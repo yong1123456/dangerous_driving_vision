@@ -41,3 +41,19 @@ logs/ffmpeg-recorder.log
 ```
 
 录像、日志、模型和数据集不会加入 Git。当前录像码率为 6 Mbps，约 30 秒事件视频通常为 20 至 25 MB。
+
+## 单帧车辆检测
+
+在香橙派的 RKNN 虚拟环境中运行：
+
+    source ~/rknn_lite_env/bin/activate
+    cd ~/dangerous_driving_vision
+    python src/vehicle_detector.py
+    python src/vehicle_detector.py --image recordings/test_inputs/road_test.png
+
+程序仅保留 COCO 中的汽车、摩托车、公交车和卡车类别，并将测试图保存到
+recordings/detection_test.jpg。录像程序和单帧检测程序当前不能同时占用摄像头；
+完成单帧验证后再将两条链路合并为一个 GStreamer 管道。
+
+当前 RKNN 模型要求 RGB、uint8、NHWC 输入，模型内部已经包含归一化。可使用
+scripts/diagnose_rknn_input.py 比较输入布局、颜色顺序和数值缩放。
