@@ -57,3 +57,14 @@ recordings/detection_test.jpg。录像程序和单帧检测程序当前不能同
 
 当前 RKNN 模型要求 RGB、uint8、NHWC 输入，模型内部已经包含归一化。可使用
 scripts/diagnose_rknn_input.py 比较输入布局、颜色顺序和数值缩放。
+
+## ByteTrack 多目标跟踪
+
+项目内置 Supervision 0.18.0 的 ByteTrack 核心源码，来源和许可证见
+third_party/supervision_bytetrack。香橙派虚拟环境需要 SciPy 1.11.4。
+
+对同一张道路测试图执行 10 帧跟踪：
+
+    python src/vehicle_tracker.py --image recordings/test_inputs/road_test.png --frames 10
+
+结果写入 recordings/tracking_test.jpg 和 recordings/tracking_test.json。
