@@ -1,0 +1,16 @@
+{
+  "camera_device": "/dev/video0",
+  "input_format": "mjpeg",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "recorder_backend": "gstreamer_mpp",
+  "video_bitrate": 6000000,
+  "gop": 30,
+  "segment_seconds": 2,
+  "buffer_seconds": 30,
+  "pre_event_seconds": 10,
+  "post_event_seconds": 15,
+  "ffmpeg": "ffmpeg",
+  "gstreamer": "gst-launch-1.0"
+}

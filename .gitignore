@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Runtime output and evidence must not be committed.
+recordings/
+logs/
+
+# Models and datasets are large and may have separate licenses.
+models/
+datasets/
+*.onnx
+*.rknn
+*.pt
