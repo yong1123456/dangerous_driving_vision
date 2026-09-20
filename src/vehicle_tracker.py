@@ -33,6 +33,14 @@ class TrackedVehicle:
     box: tuple[int, int, int, int]
 
 
+@dataclass(frozen=True)
+class VideoMetadata:
+    width: int
+    height: int
+    fps: float
+    total_frames: int
+
+
 class VehicleTracker:
     def __init__(
         self,
@@ -147,82 +155,161 @@ def image_frames(image_path: Path, limit: int) -> Iterator[np.ndarray]:
         yield image.copy()
 
 
+def inspect_video(video_path: Path) -> VideoMetadata:
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"Unable to open input video: {video_path}")
+    try:
+        width = int(round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)))
+        height = int(round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        fps = float(capture.get(cv2.CAP_PROP_FPS))
+        total_frames = int(round(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+    finally:
+        capture.release()
+    if width < 1 or height < 1:
+        raise RuntimeError(f"Invalid video dimensions: {width}x{height}")
+    if not np.isfinite(fps) or fps <= 0:
+        raise RuntimeError(f"Invalid video frame rate: {fps}")
+    return VideoMetadata(width, height, fps, max(0, total_frames))
+
+
+def video_frames(video_path: Path, limit: int | None) -> Iterator[np.ndarray]:
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"Unable to open input video: {video_path}")
+    frame_count = 0
+    try:
+        while limit is None or frame_count < limit:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            frame_count += 1
+            yield frame
+    finally:
+        capture.release()
+    if frame_count == 0:
+        raise RuntimeError(f"No frames decoded from input video: {video_path}")
+
+
+def open_video_writer(output_path: Path, metadata: VideoMetadata) -> cv2.VideoWriter:
+    if output_path.suffix.lower() != ".mp4":
+        raise ValueError("Video output must use the .mp4 extension")
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        metadata.fps,
+        (metadata.width, metadata.height),
+    )
+    if not writer.isOpened():
+        writer.release()
+        raise RuntimeError(f"Unable to open output video: {output_path}")
+    return writer
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, default=Path("/home/orangepi/yolov8n.rknn"))
-    parser.add_argument("--image", type=Path)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--image", type=Path)
+    source.add_argument("--video", type=Path)
     parser.add_argument("--camera", type=int, default=0)
-    parser.add_argument("--frames", type=int, default=10)
-    parser.add_argument("--frame-rate", type=int, default=10)
+    parser.add_argument("--frames", type=int)
+    parser.add_argument("--frame-rate", type=int)
     parser.add_argument("--confidence", type=float, default=0.10)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=PROJECT_ROOT / "recordings" / "tracking_test.jpg",
-    )
+    parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if args.frames < 1:
+    if args.frames is not None and args.frames < 1:
         raise ValueError("--frames must be at least 1")
 
-    frame_source = (
-        image_frames(args.image, args.frames)
-        if args.image
-        else camera_frames(args.camera, args.frames)
-    )
-    tracker = VehicleTracker(frame_rate=args.frame_rate)
+    video_metadata: VideoMetadata | None = None
+    if args.video:
+        video_metadata = inspect_video(args.video)
+        frame_source = video_frames(args.video, args.frames)
+        tracker_frame_rate = args.frame_rate or max(1, round(video_metadata.fps))
+        output_path = args.output or PROJECT_ROOT / "recordings" / "tracking_test.mp4"
+    else:
+        frame_limit = args.frames or 10
+        frame_source = (
+            image_frames(args.image, frame_limit)
+            if args.image
+            else camera_frames(args.camera, frame_limit)
+        )
+        tracker_frame_rate = args.frame_rate or 10
+        output_path = args.output or PROJECT_ROOT / "recordings" / "tracking_test.jpg"
+
+    tracker = VehicleTracker(frame_rate=tracker_frame_rate)
     histories: dict[int, deque[tuple[int, int]]] = defaultdict(
         lambda: deque(maxlen=30)
     )
     frame_records = []
     last_annotated: np.ndarray | None = None
+    video_writer: cv2.VideoWriter | None = None
+    processed_frames = 0
     started = time.perf_counter()
 
-    with VehicleDetector(
-        args.model,
-        confidence_threshold=args.confidence,
-    ) as detector:
-        for frame_index, frame in enumerate(frame_source, start=1):
-            detections = detector.detect(frame)
-            tracks = tracker.update(detections)
-            last_annotated = annotate_tracks(frame, tracks, histories)
-            record = {
-                "frame": frame_index,
-                "track_ids": [track.track_id for track in tracks],
-                "tracks": [
-                    {
-                        "track_id": track.track_id,
-                        "class_id": track.class_id,
-                        "label": track.label,
-                        "confidence": track.confidence,
-                        "box": list(track.box),
-                    }
-                    for track in tracks
-                ],
-            }
-            frame_records.append(record)
-            print(
-                f"frame={frame_index} detections={len(detections)} "
-                f"track_ids={record['track_ids']}"
-            )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if video_metadata is not None:
+        video_writer = open_video_writer(output_path, video_metadata)
+    try:
+        with VehicleDetector(
+            args.model,
+            confidence_threshold=args.confidence,
+        ) as detector:
+            for frame_index, frame in enumerate(frame_source, start=1):
+                detections = detector.detect(frame)
+                tracks = tracker.update(detections)
+                last_annotated = annotate_tracks(frame, tracks, histories)
+                if video_writer is not None:
+                    video_writer.write(last_annotated)
+                record = {
+                    "frame": frame_index,
+                    "timestamp_seconds": (
+                        (frame_index - 1) / video_metadata.fps
+                        if video_metadata is not None
+                        else None
+                    ),
+                    "track_ids": [track.track_id for track in tracks],
+                    "tracks": [
+                        {
+                            "track_id": track.track_id,
+                            "class_id": track.class_id,
+                            "label": track.label,
+                            "confidence": track.confidence,
+                            "box": list(track.box),
+                        }
+                        for track in tracks
+                    ],
+                }
+                frame_records.append(record)
+                processed_frames = frame_index
+                print(
+                    f"frame={frame_index} detections={len(detections)} "
+                    f"track_ids={record['track_ids']}"
+                )
+    finally:
+        if video_writer is not None:
+            video_writer.release()
 
     if last_annotated is None:
         raise RuntimeError("No frames were processed")
     elapsed = time.perf_counter() - started
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(args.output), last_annotated):
-        raise RuntimeError(f"Unable to write output image: {args.output}")
+    if video_metadata is None and not cv2.imwrite(str(output_path), last_annotated):
+        raise RuntimeError(f"Unable to write output image: {output_path}")
 
-    summary_path = args.output.with_suffix(".json")
+    summary_path = output_path.with_suffix(".json")
     summary = {
-        "frames": args.frames,
+        "frames": processed_frames,
         "elapsed_seconds": elapsed,
-        "processing_fps": args.frames / elapsed,
+        "processing_fps": processed_frames / elapsed,
         "source_image": str(args.image) if args.image else None,
-        "camera": None if args.image else args.camera,
+        "source_video": str(args.video) if args.video else None,
+        "source_fps": video_metadata.fps if video_metadata else None,
+        "source_total_frames": video_metadata.total_frames if video_metadata else None,
+        "camera": None if args.image or args.video else args.camera,
         "frame_records": frame_records,
     }
     summary_path.write_text(
@@ -230,7 +317,7 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"processing_fps={summary['processing_fps']:.2f}")
-    print(f"output={args.output.resolve()}")
+    print(f"output={output_path.resolve()}")
     print(f"summary={summary_path.resolve()}")
     return 0
 

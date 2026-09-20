@@ -68,3 +68,10 @@ third_party/supervision_bytetrack。香橙派虚拟环境需要 SciPy 1.11.4。
     python src/vehicle_tracker.py --image recordings/test_inputs/road_test.png --frames 10
 
 结果写入 recordings/tracking_test.jpg 和 recordings/tracking_test.json。
+
+离线视频跟踪会处理完整视频，并输出带车辆框、轨迹和 ID 的 MP4：
+
+    python src/vehicle_tracker.py --video recordings/test_inputs/input.mp4
+
+使用 `--frames 100` 可以只处理前 100 帧，使用 `--output` 可以指定输出 MP4
+路径。每帧的时间、车辆框、类别、置信度和跟踪 ID 会写入同名 JSON 文件。
