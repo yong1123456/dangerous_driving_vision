@@ -101,3 +101,13 @@ RKNN、摄像头或 SciPy。新生成的跟踪 JSON 已包含画面宽高：
 
 输出目录包含 `review_*.mp4` 和 `review_manifest.json`。这些文件属于生成结果，不会
 加入 Git。
+
+## 从 Windows 部署到香橙派
+
+先提交电脑端代码，再在 Windows PowerShell 中运行以下单行命令。将 IP 替换为香橙派
+当时在局域网内的实际地址：
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\deploy_orangepi.ps1 -OrangePiHost 10.151.177.72
+
+脚本仅上传当前 Git 提交中的源代码和文档，并保留香橙派已有的录像、模型、数据集和
+虚拟环境。工作区存在未提交改动时，脚本会拒绝部署。
