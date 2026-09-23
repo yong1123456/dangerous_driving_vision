@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""Analyze enriched scene observations for suspected traffic offenses."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(frozen=True)
+class OffenseConfig:
+    minimum_lane_dwell_seconds: float = 0.5
+    maximum_observation_gap_seconds: float = 0.25
+    minimum_lane_confidence: float = 0.7
+    pre_signal_seconds: float = 2.0
+    post_signal_seconds: float = 0.3
+    minimum_signal_confidence: float = 0.7
+    minimum_signal_observation_ratio: float = 0.7
+    consecutive_lane_change_window_seconds: float = 8.0
+    minimum_red_stable_seconds: float = 0.5
+    minimum_traffic_light_confidence: float = 0.7
+    minimum_litter_confidence: float = 0.7
+    minimum_litter_observations: int = 3
+
+    @classmethod
+    def from_mapping(cls, values: dict[str, Any]) -> "OffenseConfig":
+        unknown = set(values) - set(cls.__dataclass_fields__)
+        if unknown:
+            raise ValueError(f"Unknown offense config keys: {sorted(unknown)}")
+        config = cls(**values)
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        positive = {
+            "minimum_lane_dwell_seconds": self.minimum_lane_dwell_seconds,
+            "maximum_observation_gap_seconds": self.maximum_observation_gap_seconds,
+            "pre_signal_seconds": self.pre_signal_seconds,
+            "post_signal_seconds": self.post_signal_seconds,
+            "consecutive_lane_change_window_seconds": (
+                self.consecutive_lane_change_window_seconds
+            ),
+            "minimum_red_stable_seconds": self.minimum_red_stable_seconds,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
+        ratios = {
+            "minimum_lane_confidence": self.minimum_lane_confidence,
+            "minimum_signal_confidence": self.minimum_signal_confidence,
+            "minimum_signal_observation_ratio": (
+                self.minimum_signal_observation_ratio
+            ),
+            "minimum_traffic_light_confidence": (
+                self.minimum_traffic_light_confidence
+            ),
+            "minimum_litter_confidence": self.minimum_litter_confidence,
+        }
+        for name, value in ratios.items():
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} must be in the range [0, 1]")
+        if self.minimum_litter_observations < 1:
+            raise ValueError("minimum_litter_observations must be at least 1")
+
+
+@dataclass(frozen=True)
+class VehicleObservation:
+    frame: int
+    timestamp: float
+    track_id: int
+    label: str
+    lane_index: int | None
+    lane_confidence: float
+    turn_signal: str
+    turn_signal_confidence: float
+    stop_line_position: str
+    signal_id: str | None
+
+
+@dataclass(frozen=True)
+class LaneSegment:
+    lane_index: int
+    start: VehicleObservation
+    end: VehicleObservation
+
+    @property
+    def duration(self) -> float:
+        return self.end.timestamp - self.start.timestamp
+
+
+@dataclass(frozen=True)
+class LaneChange:
+    track_id: int
+    label: str
+    frame: int
+    timestamp: float
+    from_lane: int
+    to_lane: int
+
+    @property
+    def direction(self) -> str:
+        return "right" if self.to_lane > self.from_lane else "left"
+
+
+@dataclass(frozen=True)
+class LightObservation:
+    frame: int
+    timestamp: float
+    signal_id: str
+    state: str
+    confidence: float
+    applies_to_lanes: tuple[int, ...] | None
+
+
+@dataclass(frozen=True)
+class LitterObservation:
+    frame: int
+    timestamp: float
+    object_track_id: int
+    source_track_id: int
+    confidence: float
+    box: tuple[float, float, float, float] | None
+
+
+def load_json(path: Path, description: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Unable to read {description}: {path}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{description} must be a JSON object")
+    return value
+
+
+def _timestamp(record: dict[str, Any], source_fps: float | None) -> float:
+    value = record.get("timestamp_seconds")
+    if value is not None:
+        return float(value)
+    if source_fps is None or source_fps <= 0:
+        raise ValueError("Each frame needs a timestamp or a positive source_fps")
+    return (int(record["frame"]) - 1) / source_fps
+
+
+def collect_scene_observations(
+    scene: dict[str, Any],
+) -> tuple[
+    dict[int, list[VehicleObservation]],
+    dict[str, list[LightObservation]],
+    dict[int, list[LitterObservation]],
+]:
+    records = scene.get("frame_records")
+    if not isinstance(records, list):
+        raise ValueError("Scene observations must contain a frame_records list")
+    fps_value = scene.get("source_fps")
+    source_fps = float(fps_value) if fps_value is not None else None
+    vehicles: dict[int, list[VehicleObservation]] = defaultdict(list)
+    lights: dict[str, list[LightObservation]] = defaultdict(list)
+    litter: dict[int, list[LitterObservation]] = defaultdict(list)
+
+    for record in records:
+        frame = int(record["frame"])
+        timestamp = _timestamp(record, source_fps)
+        for item in record.get("vehicles", []):
+            lane_value = item.get("lane_index")
+            observation = VehicleObservation(
+                frame=frame,
+                timestamp=timestamp,
+                track_id=int(item["track_id"]),
+                label=str(item.get("label", "vehicle")),
+                lane_index=int(lane_value) if lane_value is not None else None,
+                lane_confidence=float(item.get("lane_confidence", 0.0)),
+                turn_signal=str(item.get("turn_signal", "unknown")),
+                turn_signal_confidence=float(
+                    item.get("turn_signal_confidence", 0.0)
+                ),
+                stop_line_position=str(item.get("stop_line_position", "unknown")),
+                signal_id=(
+                    str(item["signal_id"]) if item.get("signal_id") is not None else None
+                ),
+            )
+            vehicles[observation.track_id].append(observation)
+
+        for item in record.get("traffic_lights", []):
+            lanes = item.get("applies_to_lanes")
+            observation = LightObservation(
+                frame=frame,
+                timestamp=timestamp,
+                signal_id=str(item["signal_id"]),
+                state=str(item.get("state", "unknown")),
+                confidence=float(item.get("confidence", 0.0)),
+                applies_to_lanes=(
+                    tuple(int(lane) for lane in lanes) if lanes is not None else None
+                ),
+            )
+            lights[observation.signal_id].append(observation)
+
+        for item in record.get("discarded_objects", []):
+            box_values = item.get("box")
+            if box_values is not None and len(box_values) != 4:
+                raise ValueError(f"Invalid discarded-object box in frame {frame}")
+            observation = LitterObservation(
+                frame=frame,
+                timestamp=timestamp,
+                object_track_id=int(item["object_track_id"]),
+                source_track_id=int(item["source_track_id"]),
+                confidence=float(item.get("confidence", 0.0)),
+                box=(
+                    tuple(float(value) for value in box_values)
+                    if box_values is not None
+                    else None
+                ),
+            )
+            litter[observation.object_track_id].append(observation)
+
+    for collection in (vehicles, lights, litter):
+        for observations in collection.values():
+            observations.sort(key=lambda item: (item.timestamp, item.frame))
+    return dict(vehicles), dict(lights), dict(litter)
+
+
+def _stable_lane_segments(
+    observations: list[VehicleObservation], config: OffenseConfig
+) -> list[LaneSegment]:
+    eligible = [
+        observation
+        for observation in observations
+        if observation.lane_index is not None
+        and observation.lane_confidence >= config.minimum_lane_confidence
+    ]
+    if not eligible:
+        return []
+
+    segments: list[LaneSegment] = []
+    start = eligible[0]
+    previous = eligible[0]
+    for observation in eligible[1:]:
+        gap = observation.timestamp - previous.timestamp
+        if (
+            observation.lane_index != previous.lane_index
+            or gap > config.maximum_observation_gap_seconds
+        ):
+            segment = LaneSegment(int(start.lane_index), start, previous)
+            if segment.duration >= config.minimum_lane_dwell_seconds:
+                segments.append(segment)
+            start = observation
+        previous = observation
+    segment = LaneSegment(int(start.lane_index), start, previous)
+    if segment.duration >= config.minimum_lane_dwell_seconds:
+        segments.append(segment)
+    return segments
+
+
+def find_lane_changes(
+    vehicles: dict[int, list[VehicleObservation]], config: OffenseConfig
+) -> list[LaneChange]:
+    changes: list[LaneChange] = []
+    for track_id, observations in vehicles.items():
+        segments = _stable_lane_segments(observations, config)
+        for previous, current in zip(segments, segments[1:]):
+            transition_gap = current.start.timestamp - previous.end.timestamp
+            if (
+                current.lane_index == previous.lane_index
+                or transition_gap > config.maximum_observation_gap_seconds
+            ):
+                continue
+            changes.append(
+                LaneChange(
+                    track_id=track_id,
+                    label=current.start.label,
+                    frame=current.start.frame,
+                    timestamp=current.start.timestamp,
+                    from_lane=previous.lane_index,
+                    to_lane=current.lane_index,
+                )
+            )
+    return sorted(changes, key=lambda item: (item.timestamp, item.track_id))
+
+
+def _signal_evidence(
+    change: LaneChange,
+    observations: list[VehicleObservation],
+    config: OffenseConfig,
+) -> tuple[bool, float, list[str]]:
+    window = [
+        observation
+        for observation in observations
+        if change.timestamp - config.pre_signal_seconds
+        <= observation.timestamp
+        <= change.timestamp + config.post_signal_seconds
+    ]
+    if not window:
+        return False, 0.0, []
+    observed = [
+        observation
+        for observation in window
+        if observation.turn_signal in {"off", "left", "right", "hazard"}
+        and observation.turn_signal_confidence >= config.minimum_signal_confidence
+    ]
+    observation_ratio = len(observed) / len(window)
+    expected_seen = any(
+        observation.turn_signal == change.direction for observation in observed
+    )
+    return expected_seen, observation_ratio, sorted(
+        {observation.turn_signal for observation in observed}
+    )
+
+
+def lane_change_events(
+    vehicles: dict[int, list[VehicleObservation]],
+    changes: list[LaneChange],
+    config: OffenseConfig,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for change in changes:
+        expected_seen, observation_ratio, states = _signal_evidence(
+            change, vehicles[change.track_id], config
+        )
+        if (
+            not expected_seen
+            and observation_ratio >= config.minimum_signal_observation_ratio
+        ):
+            events.append(
+                {
+                    "type": "lane_change_without_signal",
+                    "status": "suspected",
+                    "track_id": change.track_id,
+                    "label": change.label,
+                    "start_frame": change.frame,
+                    "end_frame": change.frame,
+                    "start_seconds": round(change.timestamp, 3),
+                    "end_seconds": round(change.timestamp, 3),
+                    "evidence": {
+                        "from_lane": change.from_lane,
+                        "to_lane": change.to_lane,
+                        "expected_signal": change.direction,
+                        "observed_signal_states": states,
+                        "signal_observation_ratio": round(observation_ratio, 3),
+                    },
+                }
+            )
+    return events
+
+
+def consecutive_lane_change_events(
+    changes: list[LaneChange], config: OffenseConfig
+) -> list[dict[str, Any]]:
+    by_track: dict[int, list[LaneChange]] = defaultdict(list)
+    for change in changes:
+        by_track[change.track_id].append(change)
+    events: list[dict[str, Any]] = []
+    for track_changes in by_track.values():
+        start_index = 0
+        while start_index < len(track_changes):
+            end_index = start_index
+            while (
+                end_index + 1 < len(track_changes)
+                and track_changes[end_index + 1].timestamp
+                - track_changes[start_index].timestamp
+                <= config.consecutive_lane_change_window_seconds
+            ):
+                end_index += 1
+            group = track_changes[start_index : end_index + 1]
+            if len(group) >= 2:
+                first, last = group[0], group[-1]
+                events.append(
+                    {
+                        "type": "consecutive_lane_changes",
+                        "status": "suspected",
+                        "track_id": first.track_id,
+                        "label": first.label,
+                        "start_frame": first.frame,
+                        "end_frame": last.frame,
+                        "start_seconds": round(first.timestamp, 3),
+                        "end_seconds": round(last.timestamp, 3),
+                        "evidence": {
+                            "lane_change_count": len(group),
+                            "lane_sequence": [group[0].from_lane]
+                            + [change.to_lane for change in group],
+                            "window_seconds": round(
+                                last.timestamp - first.timestamp, 3
+                            ),
+                        },
+                    }
+                )
+                start_index = end_index + 1
+            else:
+                start_index += 1
+    return events
+
+
+def _red_duration_at(
+    observations: list[LightObservation],
+    timestamp: float,
+    lane_index: int | None,
+    config: OffenseConfig,
+) -> float | None:
+    eligible_indices = [
+        index
+        for index, observation in enumerate(observations)
+        if observation.timestamp <= timestamp
+        and timestamp - observation.timestamp
+        <= config.maximum_observation_gap_seconds
+    ]
+    if not eligible_indices:
+        return None
+    index = eligible_indices[-1]
+    current = observations[index]
+    if current.state != "red" or current.confidence < config.minimum_traffic_light_confidence:
+        return None
+    if (
+        current.applies_to_lanes is not None
+        and lane_index is not None
+        and lane_index not in current.applies_to_lanes
+    ):
+        return None
+    start = current.timestamp
+    while index > 0:
+        previous = observations[index - 1]
+        if (
+            current.timestamp - previous.timestamp
+            > config.maximum_observation_gap_seconds
+            or previous.state != "red"
+            or previous.confidence < config.minimum_traffic_light_confidence
+        ):
+            break
+        start = previous.timestamp
+        current = previous
+        index -= 1
+    return timestamp - start
+
+
+def red_light_events(
+    vehicles: dict[int, list[VehicleObservation]],
+    lights: dict[str, list[LightObservation]],
+    config: OffenseConfig,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for track_id, observations in vehicles.items():
+        emitted_signals: set[str] = set()
+        for previous, current in zip(observations, observations[1:]):
+            if (
+                previous.stop_line_position != "before"
+                or current.stop_line_position != "after"
+                or current.timestamp - previous.timestamp
+                > config.maximum_observation_gap_seconds
+                or current.signal_id is None
+                or current.signal_id in emitted_signals
+            ):
+                continue
+            light_history = lights.get(current.signal_id, [])
+            red_duration = _red_duration_at(
+                light_history, current.timestamp, previous.lane_index, config
+            )
+            if (
+                red_duration is None
+                or red_duration < config.minimum_red_stable_seconds
+            ):
+                continue
+            emitted_signals.add(current.signal_id)
+            events.append(
+                {
+                    "type": "red_light_running",
+                    "status": "suspected",
+                    "track_id": track_id,
+                    "label": current.label,
+                    "start_frame": previous.frame,
+                    "end_frame": current.frame,
+                    "start_seconds": round(previous.timestamp, 3),
+                    "end_seconds": round(current.timestamp, 3),
+                    "evidence": {
+                        "signal_id": current.signal_id,
+                        "lane_index": previous.lane_index,
+                        "red_stable_seconds": round(red_duration, 3),
+                        "stop_line_transition": "before_to_after",
+                    },
+                }
+            )
+    return events
+
+
+def littering_events(
+    litter: dict[int, list[LitterObservation]], config: OffenseConfig
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for object_track_id, observations in litter.items():
+        run: list[LitterObservation] = []
+        runs: list[list[LitterObservation]] = []
+        for observation in observations:
+            if observation.confidence < config.minimum_litter_confidence:
+                continue
+            if (
+                run
+                and observation.timestamp - run[-1].timestamp
+                > config.maximum_observation_gap_seconds
+            ):
+                runs.append(run)
+                run = []
+            run.append(observation)
+        if run:
+            runs.append(run)
+        for current_run in runs:
+            if len(current_run) < config.minimum_litter_observations:
+                continue
+            first, last = current_run[0], current_run[-1]
+            events.append(
+                {
+                    "type": "littering_from_vehicle",
+                    "status": "suspected",
+                    "track_id": first.source_track_id,
+                    "label": "vehicle",
+                    "start_frame": first.frame,
+                    "end_frame": last.frame,
+                    "start_seconds": round(first.timestamp, 3),
+                    "end_seconds": round(last.timestamp, 3),
+                    "evidence": {
+                        "object_track_id": object_track_id,
+                        "observation_count": len(current_run),
+                        "maximum_confidence": round(
+                            max(item.confidence for item in current_run), 3
+                        ),
+                        "last_box": (
+                            list(last.box) if last.box is not None else None
+                        ),
+                    },
+                }
+            )
+    return events
+
+
+def analyze_scene(
+    scene: dict[str, Any], config: OffenseConfig | None = None
+) -> dict[str, Any]:
+    active_config = config or OffenseConfig()
+    active_config.validate()
+    vehicles, lights, litter = collect_scene_observations(scene)
+    changes = find_lane_changes(vehicles, active_config)
+    events = lane_change_events(vehicles, changes, active_config)
+    events.extend(consecutive_lane_change_events(changes, active_config))
+    events.extend(red_light_events(vehicles, lights, active_config))
+    events.extend(littering_events(litter, active_config))
+    events.sort(key=lambda event: (event["start_seconds"], event["type"]))
+    counts = Counter(event["type"] for event in events)
+    return {
+        "schema_version": 1,
+        "source_video": scene.get("source_video"),
+        "event_count": len(events),
+        "event_counts": dict(sorted(counts.items())),
+        "config": asdict(active_config),
+        "events": events,
+        "notice": (
+            "Events are suspected behaviors for human review, not legal findings. "
+            "Signal, lane, stop-line, and object associations must be visually verified."
+        ),
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("scene_observations", type=Path)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "config" / "offense_rules.json",
+    )
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    scene = load_json(args.scene_observations, "scene observations")
+    config = OffenseConfig.from_mapping(load_json(args.config, "offense config"))
+    result = analyze_scene(scene, config)
+    output_path = args.output or args.scene_observations.with_name(
+        f"{args.scene_observations.stem}_offenses.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"events={result['event_count']}")
+    for event_type, count in result["event_counts"].items():
+        print(f"{event_type}={count}")
+    print(f"output={output_path.resolve()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,14 @@
+{
+  "minimum_lane_dwell_seconds": 0.5,
+  "maximum_observation_gap_seconds": 0.25,
+  "minimum_lane_confidence": 0.7,
+  "pre_signal_seconds": 2.0,
+  "post_signal_seconds": 0.3,
+  "minimum_signal_confidence": 0.7,
+  "minimum_signal_observation_ratio": 0.7,
+  "consecutive_lane_change_window_seconds": 8.0,
+  "minimum_red_stable_seconds": 0.5,
+  "minimum_traffic_light_confidence": 0.7,
+  "minimum_litter_confidence": 0.7,
+  "minimum_litter_observations": 3
+}
