@@ -41,14 +41,38 @@ class VideoMetadata:
     total_frames: int
 
 
+def filter_detections_by_area(
+    detections: Sequence[Detection],
+    frame_shape: Sequence[int],
+    max_area_ratio: float,
+) -> list[Detection]:
+    if not 0 < max_area_ratio <= 1:
+        raise ValueError("max_area_ratio must be in the range (0, 1]")
+    frame_area = int(frame_shape[0]) * int(frame_shape[1])
+    if frame_area <= 0:
+        raise ValueError("frame dimensions must be positive")
+    return [
+        detection
+        for detection in detections
+        if (
+            max(0, detection.box[2] - detection.box[0])
+            * max(0, detection.box[3] - detection.box[1])
+            / frame_area
+            <= max_area_ratio
+        )
+    ]
+
+
 class VehicleTracker:
     def __init__(
         self,
         frame_rate: int = 10,
-        track_threshold: float = 0.25,
-        track_buffer: int = 30,
+        track_threshold: float = 0.15,
+        track_buffer: int = 90,
         match_threshold: float = 0.8,
+        max_box_area_ratio: float = 0.35,
     ) -> None:
+        self.max_box_area_ratio = max_box_area_ratio
         self.tracker = ByteTrack(
             track_thresh=track_threshold,
             track_buffer=track_buffer,
@@ -56,7 +80,14 @@ class VehicleTracker:
             frame_rate=frame_rate,
         )
 
-    def update(self, detections: Sequence[Detection]) -> list[TrackedVehicle]:
+    def update(
+        self,
+        detections: Sequence[Detection],
+        frame_shape: Sequence[int],
+    ) -> list[TrackedVehicle]:
+        detections = filter_detections_by_area(
+            detections, frame_shape, self.max_box_area_ratio
+        )
         if detections:
             tensors = np.array(
                 [
@@ -216,6 +247,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frames", type=int)
     parser.add_argument("--frame-rate", type=int)
     parser.add_argument("--confidence", type=float, default=0.10)
+    parser.add_argument("--track-threshold", type=float, default=0.15)
+    parser.add_argument("--track-buffer", type=int, default=90)
+    parser.add_argument("--match-threshold", type=float, default=0.8)
+    parser.add_argument("--max-box-area-ratio", type=float, default=0.35)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -241,7 +276,13 @@ def main() -> int:
         tracker_frame_rate = args.frame_rate or 10
         output_path = args.output or PROJECT_ROOT / "recordings" / "tracking_test.jpg"
 
-    tracker = VehicleTracker(frame_rate=tracker_frame_rate)
+    tracker = VehicleTracker(
+        frame_rate=tracker_frame_rate,
+        track_threshold=args.track_threshold,
+        track_buffer=args.track_buffer,
+        match_threshold=args.match_threshold,
+        max_box_area_ratio=args.max_box_area_ratio,
+    )
     histories: dict[int, deque[tuple[int, int]]] = defaultdict(
         lambda: deque(maxlen=30)
     )
@@ -261,7 +302,7 @@ def main() -> int:
         ) as detector:
             for frame_index, frame in enumerate(frame_source, start=1):
                 detections = detector.detect(frame)
-                tracks = tracker.update(detections)
+                tracks = tracker.update(detections, frame.shape)
                 last_annotated = annotate_tracks(frame, tracks, histories)
                 if video_writer is not None:
                     video_writer.write(last_annotated)

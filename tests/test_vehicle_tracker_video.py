@@ -19,7 +19,12 @@ if "rknnlite.api" not in sys.modules:
     sys.modules["rknnlite"] = rknnlite
     sys.modules["rknnlite.api"] = rknnlite_api
 
-from vehicle_tracker import inspect_video, video_frames  # noqa: E402
+from vehicle_detector import Detection  # noqa: E402
+from vehicle_tracker import (  # noqa: E402
+    filter_detections_by_area,
+    inspect_video,
+    video_frames,
+)
 
 
 class VideoInputTest(unittest.TestCase):
@@ -45,6 +50,27 @@ class VideoInputTest(unittest.TestCase):
             self.assertEqual(metadata.total_frames, 5)
             self.assertEqual(len(frames), 3)
             self.assertTrue(all(frame.shape == (48, 64, 3) for frame in frames))
+
+    def test_oversized_detection_is_removed(self) -> None:
+        detections = [
+            Detection(
+                class_id=2,
+                label="car",
+                confidence=0.8,
+                box=(10, 10, 50, 40),
+            ),
+            Detection(
+                class_id=2,
+                label="car",
+                confidence=0.9,
+                box=(0, 0, 99, 99),
+            ),
+        ]
+
+        filtered = filter_detections_by_area(
+            detections, frame_shape=(100, 100, 3), max_area_ratio=0.35
+        )
+        self.assertEqual(filtered, [detections[0]])
 
 
 if __name__ == "__main__":
