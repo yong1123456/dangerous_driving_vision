@@ -346,6 +346,8 @@ def main() -> int:
         "frames": processed_frames,
         "elapsed_seconds": elapsed,
         "processing_fps": processed_frames / elapsed,
+        "frame_width": int(last_annotated.shape[1]),
+        "frame_height": int(last_annotated.shape[0]),
         "source_image": str(args.image) if args.image else None,
         "source_video": str(args.video) if args.video else None,
         "source_fps": video_metadata.fps if video_metadata else None,

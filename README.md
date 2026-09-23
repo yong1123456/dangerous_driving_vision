@@ -21,7 +21,8 @@
 4. 手动触发后保存触发前 10 秒和触发后 15 秒。
 5. 每个事件生成原始视频、现场帧、JSON 元数据和 SHA-256 清单。
 
-车辆检测、跟踪、车道线、TTC、车身颜色和车牌识别将在录像链路验证后加入。
+车辆检测、ByteTrack 跟踪和第一版轨迹风险分析已经加入。车道线、经过标定的
+TTC、车身颜色和车牌识别仍需后续实现。
 
 ## 运行（香橙派）
 
@@ -75,3 +76,18 @@ third_party/supervision_bytetrack。香橙派虚拟环境需要 SciPy 1.11.4。
 
 使用 `--frames 100` 可以只处理前 100 帧，使用 `--output` 可以指定输出 MP4
 路径。每帧的时间、车辆框、类别、置信度和跟踪 ID 会写入同名 JSON 文件。
+
+## 轨迹风险分析（电脑或香橙派）
+
+风险分析器读取跟踪 JSON，筛选“快速接近”和“快速横向移动”候选片段，不需要
+RKNN、摄像头或 SciPy。新生成的跟踪 JSON 已包含画面宽高：
+
+    python src/risk_analyzer.py recordings/tracking_test.json
+
+对于宽高字段尚未加入之前生成的 1280x720 测试结果，使用：
+
+    python src/risk_analyzer.py recordings/C_000002_tracked.json --frame-width 1280 --frame-height 720
+
+输出文件默认与输入文件位于同一目录，文件名以 `_risk.json` 结尾。候选事件只用于
+定位需要人工复核的时间段，不能单独作为危险驾驶或法律责任结论。实际 TTC 仍需完成
+摄像头内参和安装姿态标定。
