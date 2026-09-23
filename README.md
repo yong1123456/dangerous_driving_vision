@@ -91,3 +91,13 @@ RKNN、摄像头或 SciPy。新生成的跟踪 JSON 已包含画面宽高：
 输出文件默认与输入文件位于同一目录，文件名以 `_risk.json` 结尾。候选事件只用于
 定位需要人工复核的时间段，不能单独作为危险驾驶或法律责任结论。实际 TTC 仍需完成
 摄像头内参和安装姿态标定。
+
+## 导出人工复核片段（电脑或香橙派）
+
+根据风险报告从带跟踪框的视频中截取短片，默认保留事件前后各 1 秒；重叠片段会自动
+合并：
+
+    python src/review_clip_exporter.py tracked.mp4 tracked_risk.json --output-dir recordings/review_clips
+
+输出目录包含 `review_*.mp4` 和 `review_manifest.json`。这些文件属于生成结果，不会
+加入 Git。
