@@ -9,12 +9,26 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from offense_analyzer import OffenseConfig, analyze_scene  # noqa: E402
 
 
+def stable_camera_pose() -> dict:
+    return {
+        "mode": "road_context",
+        "pan_degrees": 0.0,
+        "tilt_degrees": -5.0,
+        "pan_rate_deg_s": 0.0,
+        "tilt_rate_deg_s": 0.0,
+        "calibrated": True,
+        "road_transform_valid": True,
+        "confidence": 0.98,
+    }
+
+
 def vehicle(
     track_id: int,
     lane_index: int,
     signal: str = "off",
     stop_line: str = "unknown",
     signal_id: str | None = None,
+    direction_alignment: float | None = None,
 ) -> dict:
     return {
         "track_id": track_id,
@@ -25,6 +39,8 @@ def vehicle(
         "turn_signal_confidence": 0.95,
         "stop_line_position": stop_line,
         "signal_id": signal_id,
+        "direction_alignment": direction_alignment,
+        "direction_confidence": 0.95 if direction_alignment is not None else 0.0,
     }
 
 
@@ -35,6 +51,7 @@ def scene_with_vehicle_frames(items: list[dict]) -> dict:
             {
                 "frame": index + 1,
                 "timestamp_seconds": index / 10,
+                "camera_pose": stable_camera_pose(),
                 "vehicles": [item],
             }
             for index, item in enumerate(items)
@@ -91,6 +108,7 @@ class OffenseAnalyzerTest(unittest.TestCase):
                 {
                     "frame": index + 1,
                     "timestamp_seconds": index / 10,
+                    "camera_pose": stable_camera_pose(),
                     "vehicles": [
                         vehicle(
                             7,
@@ -125,6 +143,7 @@ class OffenseAnalyzerTest(unittest.TestCase):
                 {
                     "frame": 1,
                     "timestamp_seconds": 0.0,
+                    "camera_pose": stable_camera_pose(),
                     "vehicles": [
                         vehicle(7, 0, stop_line="before", signal_id="main")
                     ],
@@ -135,6 +154,7 @@ class OffenseAnalyzerTest(unittest.TestCase):
                 {
                     "frame": 2,
                     "timestamp_seconds": 0.1,
+                    "camera_pose": stable_camera_pose(),
                     "vehicles": [vehicle(7, 0, stop_line="after", signal_id="main")],
                     "traffic_lights": [
                         {"signal_id": "main", "state": "green", "confidence": 0.95}
@@ -154,6 +174,7 @@ class OffenseAnalyzerTest(unittest.TestCase):
                 {
                     "frame": index + 1,
                     "timestamp_seconds": index / 10,
+                    "camera_pose": stable_camera_pose(),
                     "vehicles": [vehicle(4, 0)],
                     "discarded_objects": [
                         {
@@ -172,6 +193,110 @@ class OffenseAnalyzerTest(unittest.TestCase):
         event = result["events"][0]
         self.assertEqual(event["evidence"]["object_track_id"], 20)
         self.assertEqual(event["evidence"]["observation_count"], 4)
+
+    def test_fast_gimbal_motion_suppresses_road_context_rules(self) -> None:
+        moving_pose = stable_camera_pose()
+        moving_pose["pan_rate_deg_s"] = 20.0
+        records = []
+        for index, lane in enumerate([0] * 6 + [1] * 6):
+            records.append(
+                {
+                    "frame": index + 1,
+                    "timestamp_seconds": index / 10,
+                    "camera_pose": moving_pose,
+                    "vehicles": [vehicle(1, lane)],
+                }
+            )
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_count"], 0)
+
+    def test_solid_line_crossing_requires_consecutive_observations(self) -> None:
+        records = [
+            {
+                "frame": index + 1,
+                "timestamp_seconds": index / 10,
+                "camera_pose": stable_camera_pose(),
+                "lane_boundary_crossings": [
+                    {
+                        "track_id": 3,
+                        "boundary_id": "centerline",
+                        "boundary_type": "double_solid",
+                        "confidence": 0.95,
+                    }
+                ],
+            }
+            for index in range(3)
+        ]
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_counts"]["solid_line_crossing"], 1)
+        self.assertEqual(
+            result["events"][0]["evidence"]["observation_count"], 3
+        )
+
+    def test_wrong_way_requires_a_sustained_run(self) -> None:
+        records = [
+            {
+                "frame": index + 1,
+                "timestamp_seconds": index / 10,
+                "camera_pose": stable_camera_pose(),
+                "vehicles": [vehicle(8, 0, direction_alignment=-0.8)],
+            }
+            for index in range(11)
+        ]
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_counts"]["wrong_way_driving"], 1)
+        event = next(
+            event for event in result["events"] if event["type"] == "wrong_way_driving"
+        )
+        self.assertEqual(event["track_id"], 8)
+
+    def test_failure_to_yield_to_pedestrian_is_reported(self) -> None:
+        records = [
+            {
+                "frame": index + 1,
+                "timestamp_seconds": index / 10,
+                "camera_pose": stable_camera_pose(),
+                "crosswalk_interactions": [
+                    {
+                        "vehicle_track_id": 5,
+                        "pedestrian_track_id": 11,
+                        "crosswalk_id": "crosswalk_a",
+                        "pedestrian_has_priority": True,
+                        "vehicle_crossed_crosswalk": True,
+                        "vehicle_stopped_before_crosswalk": False,
+                        "confidence": 0.9,
+                    }
+                ],
+            }
+            for index in range(3)
+        ]
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_counts"]["pedestrian_failure_to_yield"], 1)
+
+    def test_target_follow_mode_suppresses_road_geometry_rules(self) -> None:
+        pose = stable_camera_pose()
+        pose["mode"] = "target_follow"
+        records = [
+            {
+                "frame": index + 1,
+                "timestamp_seconds": index / 10,
+                "camera_pose": pose,
+                "vehicles": [vehicle(2, 0 if index < 6 else 1)],
+            }
+            for index in range(12)
+        ]
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_count"], 0)
 
 
 if __name__ == "__main__":

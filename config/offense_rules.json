@@ -10,5 +10,17 @@
   "minimum_red_stable_seconds": 0.5,
   "minimum_traffic_light_confidence": 0.7,
   "minimum_litter_confidence": 0.7,
-  "minimum_litter_observations": 3
+  "minimum_litter_observations": 3,
+  "minimum_camera_pose_confidence": 0.8,
+  "maximum_context_pan_rate_deg_s": 3.0,
+  "maximum_context_tilt_rate_deg_s": 3.0,
+  "maximum_context_pan_offset_deg": 35.0,
+  "minimum_boundary_confidence": 0.75,
+  "minimum_boundary_observations": 2,
+  "minimum_wrong_way_confidence": 0.75,
+  "maximum_wrong_way_alignment": -0.5,
+  "minimum_wrong_way_seconds": 1.0,
+  "minimum_crosswalk_confidence": 0.75,
+  "minimum_crosswalk_observations": 3,
+  "require_valid_road_context": true
 }

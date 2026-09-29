@@ -25,6 +25,18 @@ class OffenseConfig:
     minimum_traffic_light_confidence: float = 0.7
     minimum_litter_confidence: float = 0.7
     minimum_litter_observations: int = 3
+    minimum_camera_pose_confidence: float = 0.8
+    maximum_context_pan_rate_deg_s: float = 3.0
+    maximum_context_tilt_rate_deg_s: float = 3.0
+    maximum_context_pan_offset_deg: float = 35.0
+    minimum_boundary_confidence: float = 0.75
+    minimum_boundary_observations: int = 2
+    minimum_wrong_way_confidence: float = 0.75
+    maximum_wrong_way_alignment: float = -0.5
+    minimum_wrong_way_seconds: float = 1.0
+    minimum_crosswalk_confidence: float = 0.75
+    minimum_crosswalk_observations: int = 3
+    require_valid_road_context: bool = True
 
     @classmethod
     def from_mapping(cls, values: dict[str, Any]) -> "OffenseConfig":
@@ -45,6 +57,12 @@ class OffenseConfig:
                 self.consecutive_lane_change_window_seconds
             ),
             "minimum_red_stable_seconds": self.minimum_red_stable_seconds,
+            "maximum_context_pan_rate_deg_s": self.maximum_context_pan_rate_deg_s,
+            "maximum_context_tilt_rate_deg_s": (
+                self.maximum_context_tilt_rate_deg_s
+            ),
+            "maximum_context_pan_offset_deg": self.maximum_context_pan_offset_deg,
+            "minimum_wrong_way_seconds": self.minimum_wrong_way_seconds,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -59,12 +77,66 @@ class OffenseConfig:
                 self.minimum_traffic_light_confidence
             ),
             "minimum_litter_confidence": self.minimum_litter_confidence,
+            "minimum_camera_pose_confidence": self.minimum_camera_pose_confidence,
+            "minimum_boundary_confidence": self.minimum_boundary_confidence,
+            "minimum_wrong_way_confidence": self.minimum_wrong_way_confidence,
+            "minimum_crosswalk_confidence": self.minimum_crosswalk_confidence,
         }
         for name, value in ratios.items():
             if not 0 <= value <= 1:
                 raise ValueError(f"{name} must be in the range [0, 1]")
         if self.minimum_litter_observations < 1:
             raise ValueError("minimum_litter_observations must be at least 1")
+        if self.minimum_crosswalk_observations < 1:
+            raise ValueError("minimum_crosswalk_observations must be at least 1")
+        if self.minimum_boundary_observations < 1:
+            raise ValueError("minimum_boundary_observations must be at least 1")
+        if not -1 <= self.maximum_wrong_way_alignment <= 1:
+            raise ValueError("maximum_wrong_way_alignment must be in the range [-1, 1]")
+
+
+@dataclass(frozen=True)
+class CameraPose:
+    mode: str
+    pan_degrees: float
+    tilt_degrees: float
+    pan_rate_deg_s: float
+    tilt_rate_deg_s: float
+    calibrated: bool
+    road_transform_valid: bool
+    confidence: float
+
+
+def camera_pose_from_record(record: dict[str, Any]) -> CameraPose | None:
+    value = record.get("camera_pose")
+    if not isinstance(value, dict):
+        return None
+    return CameraPose(
+        mode=str(value.get("mode", "unknown")),
+        pan_degrees=float(value.get("pan_degrees", 0.0)),
+        tilt_degrees=float(value.get("tilt_degrees", 0.0)),
+        pan_rate_deg_s=float(value.get("pan_rate_deg_s", 0.0)),
+        tilt_rate_deg_s=float(value.get("tilt_rate_deg_s", 0.0)),
+        calibrated=bool(value.get("calibrated", False)),
+        road_transform_valid=bool(value.get("road_transform_valid", False)),
+        confidence=float(value.get("confidence", 0.0)),
+    )
+
+
+def road_context_is_valid(
+    pose: CameraPose | None, config: OffenseConfig
+) -> bool:
+    if pose is None:
+        return not config.require_valid_road_context
+    return (
+        pose.mode == "road_context"
+        and pose.calibrated
+        and pose.road_transform_valid
+        and pose.confidence >= config.minimum_camera_pose_confidence
+        and abs(pose.pan_degrees) <= config.maximum_context_pan_offset_deg
+        and abs(pose.pan_rate_deg_s) <= config.maximum_context_pan_rate_deg_s
+        and abs(pose.tilt_rate_deg_s) <= config.maximum_context_tilt_rate_deg_s
+    )
 
 
 @dataclass(frozen=True)
@@ -79,6 +151,9 @@ class VehicleObservation:
     turn_signal_confidence: float
     stop_line_position: str
     signal_id: str | None
+    direction_alignment: float | None
+    direction_confidence: float
+    road_context_valid: bool
 
 
 @dataclass(frozen=True)
@@ -114,6 +189,7 @@ class LightObservation:
     state: str
     confidence: float
     applies_to_lanes: tuple[int, ...] | None
+    road_context_valid: bool
 
 
 @dataclass(frozen=True)
@@ -124,6 +200,31 @@ class LitterObservation:
     source_track_id: int
     confidence: float
     box: tuple[float, float, float, float] | None
+
+
+@dataclass(frozen=True)
+class BoundaryCrossingObservation:
+    frame: int
+    timestamp: float
+    track_id: int
+    boundary_id: str
+    boundary_type: str
+    confidence: float
+    road_context_valid: bool
+
+
+@dataclass(frozen=True)
+class CrosswalkInteractionObservation:
+    frame: int
+    timestamp: float
+    vehicle_track_id: int
+    pedestrian_track_id: int
+    crosswalk_id: str
+    pedestrian_has_priority: bool
+    vehicle_crossed_crosswalk: bool
+    vehicle_stopped_before_crosswalk: bool
+    confidence: float
+    road_context_valid: bool
 
 
 def load_json(path: Path, description: str) -> dict[str, Any]:
@@ -146,11 +247,13 @@ def _timestamp(record: dict[str, Any], source_fps: float | None) -> float:
 
 
 def collect_scene_observations(
-    scene: dict[str, Any],
+    scene: dict[str, Any], config: OffenseConfig
 ) -> tuple[
     dict[int, list[VehicleObservation]],
     dict[str, list[LightObservation]],
     dict[int, list[LitterObservation]],
+    list[BoundaryCrossingObservation],
+    list[CrosswalkInteractionObservation],
 ]:
     records = scene.get("frame_records")
     if not isinstance(records, list):
@@ -160,12 +263,18 @@ def collect_scene_observations(
     vehicles: dict[int, list[VehicleObservation]] = defaultdict(list)
     lights: dict[str, list[LightObservation]] = defaultdict(list)
     litter: dict[int, list[LitterObservation]] = defaultdict(list)
+    boundary_crossings: list[BoundaryCrossingObservation] = []
+    crosswalk_interactions: list[CrosswalkInteractionObservation] = []
 
     for record in records:
         frame = int(record["frame"])
         timestamp = _timestamp(record, source_fps)
+        context_valid = road_context_is_valid(
+            camera_pose_from_record(record), config
+        )
         for item in record.get("vehicles", []):
             lane_value = item.get("lane_index")
+            direction_value = item.get("direction_alignment")
             observation = VehicleObservation(
                 frame=frame,
                 timestamp=timestamp,
@@ -181,6 +290,11 @@ def collect_scene_observations(
                 signal_id=(
                     str(item["signal_id"]) if item.get("signal_id") is not None else None
                 ),
+                direction_alignment=(
+                    float(direction_value) if direction_value is not None else None
+                ),
+                direction_confidence=float(item.get("direction_confidence", 0.0)),
+                road_context_valid=context_valid,
             )
             vehicles[observation.track_id].append(observation)
 
@@ -195,6 +309,7 @@ def collect_scene_observations(
                 applies_to_lanes=(
                     tuple(int(lane) for lane in lanes) if lanes is not None else None
                 ),
+                road_context_valid=context_valid,
             )
             lights[observation.signal_id].append(observation)
 
@@ -216,10 +331,55 @@ def collect_scene_observations(
             )
             litter[observation.object_track_id].append(observation)
 
+        for item in record.get("lane_boundary_crossings", []):
+            boundary_crossings.append(
+                BoundaryCrossingObservation(
+                    frame=frame,
+                    timestamp=timestamp,
+                    track_id=int(item["track_id"]),
+                    boundary_id=str(item["boundary_id"]),
+                    boundary_type=str(item.get("boundary_type", "unknown")),
+                    confidence=float(item.get("confidence", 0.0)),
+                    road_context_valid=context_valid,
+                )
+            )
+
+        for item in record.get("crosswalk_interactions", []):
+            crosswalk_interactions.append(
+                CrosswalkInteractionObservation(
+                    frame=frame,
+                    timestamp=timestamp,
+                    vehicle_track_id=int(item["vehicle_track_id"]),
+                    pedestrian_track_id=int(item["pedestrian_track_id"]),
+                    crosswalk_id=str(item["crosswalk_id"]),
+                    pedestrian_has_priority=bool(
+                        item.get("pedestrian_has_priority", False)
+                    ),
+                    vehicle_crossed_crosswalk=bool(
+                        item.get("vehicle_crossed_crosswalk", False)
+                    ),
+                    vehicle_stopped_before_crosswalk=bool(
+                        item.get("vehicle_stopped_before_crosswalk", False)
+                    ),
+                    confidence=float(item.get("confidence", 0.0)),
+                    road_context_valid=context_valid,
+                )
+            )
+
     for collection in (vehicles, lights, litter):
         for observations in collection.values():
             observations.sort(key=lambda item: (item.timestamp, item.frame))
-    return dict(vehicles), dict(lights), dict(litter)
+    boundary_crossings.sort(key=lambda item: (item.timestamp, item.track_id))
+    crosswalk_interactions.sort(
+        key=lambda item: (item.timestamp, item.vehicle_track_id)
+    )
+    return (
+        dict(vehicles),
+        dict(lights),
+        dict(litter),
+        boundary_crossings,
+        crosswalk_interactions,
+    )
 
 
 def _stable_lane_segments(
@@ -228,7 +388,8 @@ def _stable_lane_segments(
     eligible = [
         observation
         for observation in observations
-        if observation.lane_index is not None
+        if observation.road_context_valid
+        and observation.lane_index is not None
         and observation.lane_confidence >= config.minimum_lane_confidence
     ]
     if not eligible:
@@ -401,7 +562,8 @@ def _red_duration_at(
     eligible_indices = [
         index
         for index, observation in enumerate(observations)
-        if observation.timestamp <= timestamp
+        if observation.road_context_valid
+        and observation.timestamp <= timestamp
         and timestamp - observation.timestamp
         <= config.maximum_observation_gap_seconds
     ]
@@ -423,6 +585,7 @@ def _red_duration_at(
         if (
             current.timestamp - previous.timestamp
             > config.maximum_observation_gap_seconds
+            or not previous.road_context_valid
             or previous.state != "red"
             or previous.confidence < config.minimum_traffic_light_confidence
         ):
@@ -443,7 +606,9 @@ def red_light_events(
         emitted_signals: set[str] = set()
         for previous, current in zip(observations, observations[1:]):
             if (
-                previous.stop_line_position != "before"
+                not previous.road_context_valid
+                or not current.road_context_valid
+                or previous.stop_line_position != "before"
                 or current.stop_line_position != "after"
                 or current.timestamp - previous.timestamp
                 > config.maximum_observation_gap_seconds
@@ -476,6 +641,196 @@ def red_light_events(
                         "lane_index": previous.lane_index,
                         "red_stable_seconds": round(red_duration, 3),
                         "stop_line_transition": "before_to_after",
+                    },
+                }
+            )
+    return events
+
+
+def solid_line_crossing_events(
+    observations: list[BoundaryCrossingObservation], config: OffenseConfig
+) -> list[dict[str, Any]]:
+    solid_types = {"solid", "double_solid", "solid_yellow", "double_yellow"}
+    grouped: dict[tuple[int, str], list[BoundaryCrossingObservation]] = defaultdict(
+        list
+    )
+    for observation in observations:
+        if (
+            observation.road_context_valid
+            and observation.boundary_type in solid_types
+            and observation.confidence >= config.minimum_boundary_confidence
+        ):
+            grouped[(observation.track_id, observation.boundary_id)].append(
+                observation
+            )
+
+    events: list[dict[str, Any]] = []
+    for (track_id, boundary_id), group in grouped.items():
+        runs: list[list[BoundaryCrossingObservation]] = []
+        current_run: list[BoundaryCrossingObservation] = []
+        for observation in group:
+            if (
+                current_run
+                and observation.timestamp - current_run[-1].timestamp
+                > config.maximum_observation_gap_seconds
+            ):
+                runs.append(current_run)
+                current_run = []
+            current_run.append(observation)
+        if current_run:
+            runs.append(current_run)
+        for run in runs:
+            if len(run) < config.minimum_boundary_observations:
+                continue
+            first, last = run[0], run[-1]
+            events.append(
+                {
+                    "type": "solid_line_crossing",
+                    "status": "suspected",
+                    "track_id": track_id,
+                    "label": "vehicle",
+                    "start_frame": first.frame,
+                    "end_frame": last.frame,
+                    "start_seconds": round(first.timestamp, 3),
+                    "end_seconds": round(last.timestamp, 3),
+                    "evidence": {
+                        "boundary_id": boundary_id,
+                        "boundary_type": first.boundary_type,
+                        "observation_count": len(run),
+                        "maximum_confidence": round(
+                            max(item.confidence for item in run), 3
+                        ),
+                    },
+                }
+            )
+    return events
+
+
+def wrong_way_events(
+    vehicles: dict[int, list[VehicleObservation]], config: OffenseConfig
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for track_id, observations in vehicles.items():
+        runs: list[list[VehicleObservation]] = []
+        current_run: list[VehicleObservation] = []
+        for observation in observations:
+            eligible = (
+                observation.road_context_valid
+                and observation.direction_alignment is not None
+                and observation.direction_alignment
+                <= config.maximum_wrong_way_alignment
+                and observation.direction_confidence
+                >= config.minimum_wrong_way_confidence
+            )
+            if not eligible:
+                if current_run:
+                    runs.append(current_run)
+                    current_run = []
+                continue
+            if (
+                current_run
+                and observation.timestamp - current_run[-1].timestamp
+                > config.maximum_observation_gap_seconds
+            ):
+                runs.append(current_run)
+                current_run = []
+            current_run.append(observation)
+        if current_run:
+            runs.append(current_run)
+
+        for run in runs:
+            first, last = run[0], run[-1]
+            if last.timestamp - first.timestamp < config.minimum_wrong_way_seconds:
+                continue
+            events.append(
+                {
+                    "type": "wrong_way_driving",
+                    "status": "suspected",
+                    "track_id": track_id,
+                    "label": first.label,
+                    "start_frame": first.frame,
+                    "end_frame": last.frame,
+                    "start_seconds": round(first.timestamp, 3),
+                    "end_seconds": round(last.timestamp, 3),
+                    "evidence": {
+                        "minimum_direction_alignment": round(
+                            min(
+                                item.direction_alignment
+                                for item in run
+                                if item.direction_alignment is not None
+                            ),
+                            3,
+                        ),
+                        "duration_seconds": round(
+                            last.timestamp - first.timestamp, 3
+                        ),
+                        "observation_count": len(run),
+                    },
+                }
+            )
+    return events
+
+
+def pedestrian_failure_to_yield_events(
+    observations: list[CrosswalkInteractionObservation], config: OffenseConfig
+) -> list[dict[str, Any]]:
+    grouped: dict[
+        tuple[int, int, str], list[CrosswalkInteractionObservation]
+    ] = defaultdict(list)
+    for observation in observations:
+        if (
+            observation.road_context_valid
+            and observation.pedestrian_has_priority
+            and observation.confidence >= config.minimum_crosswalk_confidence
+        ):
+            grouped[
+                (
+                    observation.vehicle_track_id,
+                    observation.pedestrian_track_id,
+                    observation.crosswalk_id,
+                )
+            ].append(observation)
+
+    events: list[dict[str, Any]] = []
+    for (vehicle_id, pedestrian_id, crosswalk_id), group in grouped.items():
+        runs: list[list[CrosswalkInteractionObservation]] = []
+        current_run: list[CrosswalkInteractionObservation] = []
+        for observation in group:
+            if (
+                current_run
+                and observation.timestamp - current_run[-1].timestamp
+                > config.maximum_observation_gap_seconds
+            ):
+                runs.append(current_run)
+                current_run = []
+            current_run.append(observation)
+        if current_run:
+            runs.append(current_run)
+        for run in runs:
+            crossed = [item for item in run if item.vehicle_crossed_crosswalk]
+            if (
+                len(run) < config.minimum_crosswalk_observations
+                or not crossed
+                or any(item.vehicle_stopped_before_crosswalk for item in run)
+            ):
+                continue
+            first, last = run[0], run[-1]
+            events.append(
+                {
+                    "type": "pedestrian_failure_to_yield",
+                    "status": "suspected",
+                    "track_id": vehicle_id,
+                    "label": "vehicle",
+                    "start_frame": first.frame,
+                    "end_frame": last.frame,
+                    "start_seconds": round(first.timestamp, 3),
+                    "end_seconds": round(last.timestamp, 3),
+                    "evidence": {
+                        "pedestrian_track_id": pedestrian_id,
+                        "crosswalk_id": crosswalk_id,
+                        "observation_count": len(run),
+                        "crossing_frame": crossed[0].frame,
+                        "vehicle_stopped_before_crosswalk": False,
                     },
                 }
             )
@@ -536,16 +891,29 @@ def analyze_scene(
 ) -> dict[str, Any]:
     active_config = config or OffenseConfig()
     active_config.validate()
-    vehicles, lights, litter = collect_scene_observations(scene)
+    (
+        vehicles,
+        lights,
+        litter,
+        boundary_crossings,
+        crosswalk_interactions,
+    ) = collect_scene_observations(scene, active_config)
     changes = find_lane_changes(vehicles, active_config)
     events = lane_change_events(vehicles, changes, active_config)
     events.extend(consecutive_lane_change_events(changes, active_config))
     events.extend(red_light_events(vehicles, lights, active_config))
+    events.extend(solid_line_crossing_events(boundary_crossings, active_config))
+    events.extend(wrong_way_events(vehicles, active_config))
+    events.extend(
+        pedestrian_failure_to_yield_events(
+            crosswalk_interactions, active_config
+        )
+    )
     events.extend(littering_events(litter, active_config))
     events.sort(key=lambda event: (event["start_seconds"], event["type"]))
     counts = Counter(event["type"] for event in events)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_video": scene.get("source_video"),
         "event_count": len(events),
         "event_counts": dict(sorted(counts.items())),
