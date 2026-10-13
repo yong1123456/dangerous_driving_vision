@@ -22,6 +22,8 @@ sys.path.insert(0, str(VENDOR_ROOT))
 
 from supervision import ByteTrack  # noqa: E402
 from vehicle_detector import VEHICLE_CLASSES, Detection, VehicleDetector  # noqa: E402
+from target_lock import TargetLock, TargetLockConfig, TargetLockState  # noqa: E402
+from track_label_smoother import TrackLabelSmoother  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,7 @@ class VehicleTracker:
             match_thresh=match_threshold,
             frame_rate=frame_rate,
         )
+        self.label_smoother = TrackLabelSmoother()
 
     def update(
         self,
@@ -104,16 +107,25 @@ class VehicleTracker:
             tensors = np.empty((0, 6), dtype=np.float32)
 
         tracks = self.tracker.update_with_tensors(tensors)
-        return [
-            TrackedVehicle(
-                track_id=int(track.track_id),
-                class_id=int(track.class_ids),
-                label=VEHICLE_CLASSES.get(int(track.class_ids), "vehicle"),
-                confidence=float(track.score),
-                box=tuple(int(round(value)) for value in track.tlbr),
+        output: list[TrackedVehicle] = []
+        for track in tracks:
+            track_id = int(track.track_id)
+            class_id = int(track.class_ids)
+            confidence = float(track.score)
+            label = VEHICLE_CLASSES.get(class_id, "vehicle")
+            stable = self.label_smoother.observe(
+                track_id, class_id, label, confidence
             )
-            for track in tracks
-        ]
+            output.append(
+                TrackedVehicle(
+                    track_id=track_id,
+                    class_id=stable.class_id,
+                    label=stable.label,
+                    confidence=confidence,
+                    box=tuple(int(round(value)) for value in track.tlbr),
+                )
+            )
+        return output
 
 
 def color_for_track(track_id: int) -> tuple[int, int, int]:
@@ -132,6 +144,7 @@ def annotate_tracks(
     frame: np.ndarray,
     tracks: Sequence[TrackedVehicle],
     histories: dict[int, deque[tuple[int, int]]],
+    target_state: TargetLockState | None = None,
 ) -> np.ndarray:
     annotated = frame.copy()
     for track in tracks:
@@ -153,6 +166,37 @@ def annotate_tracks(
         points = np.array(histories[track.track_id], dtype=np.int32)
         if len(points) >= 2:
             cv2.polylines(annotated, [points], False, color, 2, cv2.LINE_AA)
+    if target_state is not None:
+        label = {
+            "locked": "TARGET LOCKED",
+            "temporarily_lost": "TARGET TEMPORARILY LOST",
+            "candidate": "TARGET CANDIDATE",
+            "lost": "TARGET LOST - NO AUTO SWITCH",
+            "waiting": "TARGET WAITING",
+        }.get(target_state.state, "TARGET")
+        if target_state.target_track_id is not None:
+            label += f" #{target_state.target_track_id}"
+        color = (0, 0, 255) if target_state.is_locked else (0, 165, 255)
+        if target_state.box is not None:
+            x1, y1, x2, y2 = target_state.box
+            thickness = 4 if target_state.is_locked else 3
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
+            text_origin = (
+                max(8, x1),
+                min(frame.shape[0] - 12, max(28, y2 + 28)),
+            )
+        else:
+            text_origin = (20, 40)
+        cv2.putText(
+            annotated,
+            label,
+            text_origin,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
     return annotated
 
 
@@ -251,14 +295,55 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--track-buffer", type=int, default=90)
     parser.add_argument("--match-threshold", type=float, default=0.8)
     parser.add_argument("--max-box-area-ratio", type=float, default=0.35)
+    parser.add_argument(
+        "--target-track-id",
+        type=int,
+        help="Lock a specific ByteTrack ID (select it from a first tracking pass).",
+    )
+    parser.add_argument(
+        "--target-point",
+        type=str,
+        help="Lock the vehicle containing the first-frame point, formatted as X,Y.",
+    )
+    parser.add_argument("--lock-confirm-frames", type=int, default=3)
+    parser.add_argument("--target-max-missed", type=int, default=10)
+    parser.add_argument("--target-min-iou", type=float, default=0.10)
+    parser.add_argument("--target-max-center-distance", type=float, default=0.20)
+    parser.add_argument("--target-min-match-score", type=float, default=0.35)
+    parser.add_argument("--target-min-match-margin", type=float, default=0.10)
+    parser.add_argument("--target-max-area-change", type=float, default=2.25)
+    parser.add_argument("--reassociation-confirm-frames", type=int, default=2)
+    parser.add_argument("--max-reassociation-gap", type=int, default=3)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
+
+
+def parse_target_point(value: str | None) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError("--target-point must use X,Y format")
+    try:
+        point = (float(parts[0]), float(parts[1]))
+    except ValueError as error:
+        raise ValueError("--target-point must contain numeric X,Y values") from error
+    if not all(np.isfinite(item) for item in point):
+        raise ValueError("--target-point values must be finite")
+    return point
 
 
 def main() -> int:
     args = parse_args()
     if args.frames is not None and args.frames < 1:
         raise ValueError("--frames must be at least 1")
+    target_point = parse_target_point(args.target_point)
+    if args.target_track_id is not None and args.target_track_id < 1:
+        raise ValueError("--target-track-id must be positive")
+    if args.target_track_id is None and target_point is None:
+        target_lock_requested = False
+    else:
+        target_lock_requested = True
 
     video_metadata: VideoMetadata | None = None
     if args.video:
@@ -288,6 +373,7 @@ def main() -> int:
     )
     frame_records = []
     last_annotated: np.ndarray | None = None
+    target_lock: TargetLock | None = None
     video_writer: cv2.VideoWriter | None = None
     processed_frames = 0
     started = time.perf_counter()
@@ -303,7 +389,27 @@ def main() -> int:
             for frame_index, frame in enumerate(frame_source, start=1):
                 detections = detector.detect(frame)
                 tracks = tracker.update(detections, frame.shape)
-                last_annotated = annotate_tracks(frame, tracks, histories)
+                if target_lock_requested and target_lock is None:
+                    target_lock = TargetLock(
+                        frame.shape,
+                        target_track_id=args.target_track_id,
+                        target_point=target_point,
+                        config=TargetLockConfig(
+                            confirm_frames=args.lock_confirm_frames,
+                            max_missed_frames=args.target_max_missed,
+                            min_iou=args.target_min_iou,
+                            max_center_distance_ratio=args.target_max_center_distance,
+                            min_match_score=args.target_min_match_score,
+                            min_match_margin=args.target_min_match_margin,
+                            max_area_change_ratio=args.target_max_area_change,
+                            reassociation_confirm_frames=args.reassociation_confirm_frames,
+                            max_reassociation_gap_frames=args.max_reassociation_gap,
+                        ),
+                    )
+                target_state = target_lock.update(tracks) if target_lock else None
+                last_annotated = annotate_tracks(
+                    frame, tracks, histories, target_state
+                )
                 if video_writer is not None:
                     video_writer.write(last_annotated)
                 record = {
@@ -325,6 +431,8 @@ def main() -> int:
                         for track in tracks
                     ],
                 }
+                if target_state is not None:
+                    record["target_lock"] = target_state.as_dict()
                 frame_records.append(record)
                 processed_frames = frame_index
                 print(
@@ -353,8 +461,68 @@ def main() -> int:
         "source_fps": video_metadata.fps if video_metadata else None,
         "source_total_frames": video_metadata.total_frames if video_metadata else None,
         "camera": None if args.image or args.video else args.camera,
+        "target_lock_requested": target_lock_requested,
+        "target_lock_config": (
+            {
+                "target_track_id": args.target_track_id,
+                "target_point": list(target_point) if target_point else None,
+                "confirm_frames": args.lock_confirm_frames,
+                "max_missed_frames": args.target_max_missed,
+                "min_iou": args.target_min_iou,
+                "max_center_distance_ratio": args.target_max_center_distance,
+                "min_match_score": args.target_min_match_score,
+                "min_match_margin": args.target_min_match_margin,
+                "max_area_change_ratio": args.target_max_area_change,
+                "reassociation_confirm_frames": args.reassociation_confirm_frames,
+                "max_reassociation_gap_frames": args.max_reassociation_gap,
+            }
+            if target_lock_requested
+            else None
+        ),
         "frame_records": frame_records,
     }
+    if target_lock_requested:
+        target_states = [
+            record["target_lock"]
+            for record in frame_records
+            if "target_lock" in record
+        ]
+        state_counts: dict[str, int] = {}
+        for state in target_states:
+            name = str(state["state"])
+            state_counts[name] = state_counts.get(name, 0) + 1
+        summary["target_lock_summary"] = {
+            "final_state": target_states[-1]["state"] if target_states else "waiting",
+            "state_counts": state_counts,
+            "track_ids_seen_by_lock": sorted(
+                {
+                    int(state["target_track_id"])
+                    for state in target_states
+                    if state.get("target_track_id") is not None
+                }
+            ),
+            "max_missed_frames": max(
+                (int(state["missed_frames"]) for state in target_states),
+                default=0,
+            ),
+            "lock_acquired_frame": next(
+                (
+                    int(record["frame"])
+                    for record in frame_records
+                    if record.get("target_lock", {}).get("state") == "locked"
+                ),
+                None,
+            ),
+            "reassociation_count": sum(
+                1
+                for state in target_states
+                if state.get("match_method") == "reassociated"
+            ),
+            "notice": (
+                "A locked target is a tracking result. Confirm any traffic offense "
+                "with calibrated road observations and the original video."
+            ),
+        }
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + chr(10),
         encoding="utf-8",

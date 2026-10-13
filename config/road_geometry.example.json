@@ -1,0 +1,22 @@
+{
+  "image_width": 1280,
+  "image_height": 720,
+  "normalized": true,
+  "boundary_confidence": 0.9,
+  "boundary_hold_frames": 2,
+  "camera_pose": {
+    "mode": "road_context",
+    "pan_degrees": 0.0,
+    "tilt_degrees": 0.0,
+    "pan_rate_deg_s": 0.0,
+    "tilt_rate_deg_s": 0.0,
+    "calibrated": true,
+    "road_transform_valid": true,
+    "confidence": 0.95
+  },
+  "boundaries": [
+    {"id": "road_left", "type": "dashed", "points": [[0.10, 1.0], [0.42, 0.40]]},
+    {"id": "center_solid", "type": "double_solid", "points": [[0.50, 1.0], [0.50, 0.40]]},
+    {"id": "road_right", "type": "dashed", "points": [[0.90, 1.0], [0.58, 0.40]]}
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "image_width": 2560,
+  "image_height": 1528,
+  "normalized": true,
+  "validation_only": true,
+  "notes": "Manual lower-road calibration for the Chinese tunnel screen recording. The upper road is obscured by an overlay; verify the original source before reuse.",
+  "boundary_confidence": 0.82,
+  "boundary_hold_frames": 3,
+  "camera_pose": {
+    "mode": "road_context",
+    "pan_degrees": 0.0,
+    "tilt_degrees": 0.0,
+    "pan_rate_deg_s": 0.0,
+    "tilt_rate_deg_s": 0.0,
+    "calibrated": true,
+    "road_transform_valid": true,
+    "confidence": 0.82
+  },
+  "boundaries": [
+    {"id": "left_lane_edge", "type": "dashed", "points": [[0.14, 1.0], [0.43, 0.40]]},
+    {"id": "suspected_solid_lane_line", "type": "solid", "points": [[0.55, 1.0], [0.50, 0.40]]},
+    {"id": "right_lane_edge", "type": "dashed", "points": [[0.88, 1.0], [0.59, 0.40]]}
+  ]
+}

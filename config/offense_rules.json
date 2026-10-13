@@ -22,5 +22,6 @@
   "minimum_wrong_way_seconds": 1.0,
   "minimum_crosswalk_confidence": 0.75,
   "minimum_crosswalk_observations": 3,
+  "crosswalk_event_merge_seconds": 1.0,
   "require_valid_road_context": true
 }

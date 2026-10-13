@@ -99,9 +99,16 @@ def resolve_frame_size(
 
 def collect_observations(
     summary: dict[str, Any],
+    *,
+    target_lock_only: bool = False,
 ) -> dict[int, list[TrackObservation]]:
     source_fps = summary.get("source_fps")
     tracks: dict[int, list[TrackObservation]] = defaultdict(list)
+    canonical_target_id: int | None = None
+    if target_lock_only:
+        requested_id = (summary.get("target_lock_config") or {}).get("target_track_id")
+        if requested_id is not None:
+            canonical_target_id = int(requested_id)
     for frame_record in summary["frame_records"]:
         frame = int(frame_record["frame"])
         timestamp_value = frame_record.get("timestamp_seconds")
@@ -111,14 +118,32 @@ def collect_observations(
             timestamp = (frame - 1) / float(source_fps)
         else:
             timestamp = float(timestamp_value)
-        for track in frame_record.get("tracks", []):
+        frame_tracks = frame_record.get("tracks", [])
+        if target_lock_only:
+            lock = frame_record.get("target_lock")
+            if not isinstance(lock, dict) or lock.get("state") != "locked":
+                continue
+            active_id = lock.get("target_track_id")
+            if active_id is None:
+                continue
+            active_id = int(active_id)
+            if canonical_target_id is None:
+                canonical_target_id = active_id
+            frame_tracks = [
+                track for track in frame_tracks if int(track.get("track_id", -1)) == active_id
+            ]
+        for track in frame_tracks:
             box_values = track.get("box", [])
             if len(box_values) != 4:
                 raise ValueError(f"Invalid box in frame {frame}")
             observation = TrackObservation(
                 frame=frame,
                 timestamp=timestamp,
-                track_id=int(track["track_id"]),
+                track_id=(
+                    canonical_target_id
+                    if target_lock_only and canonical_target_id is not None
+                    else int(track["track_id"])
+                ),
                 label=str(track.get("label", "vehicle")),
                 confidence=float(track.get("confidence", 0.0)),
                 box=tuple(float(value) for value in box_values),
@@ -127,6 +152,8 @@ def collect_observations(
                 tracks[observation.track_id].append(observation)
     for observations in tracks.values():
         observations.sort(key=lambda item: (item.timestamp, item.frame))
+    if target_lock_only and canonical_target_id is None:
+        raise ValueError("Tracking JSON does not contain a locked target")
     return dict(tracks)
 
 
@@ -271,11 +298,12 @@ def analyze_tracking(
     config: AnalysisConfig | None = None,
     frame_width: int | None = None,
     frame_height: int | None = None,
+    target_lock_only: bool = False,
 ) -> dict[str, Any]:
     active_config = config or AnalysisConfig()
     active_config.validate()
     width, height = resolve_frame_size(summary, frame_width, frame_height)
-    tracks = collect_observations(summary)
+    tracks = collect_observations(summary, target_lock_only=target_lock_only)
     candidates = find_candidates(tracks, width, height, active_config)
     events = merge_candidates(candidates, active_config.merge_gap_seconds)
     counts = Counter(event["type"] for event in events)
@@ -287,6 +315,7 @@ def analyze_tracking(
         "observation_count": sum(len(items) for items in tracks.values()),
         "event_count": len(events),
         "event_counts": dict(sorted(counts.items())),
+        "analysis_scope": "target_lock" if target_lock_only else "all_tracks",
         "config": asdict(active_config),
         "events": events,
         "notice": (
@@ -304,6 +333,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frame-height", type=int)
     parser.add_argument("--maximum-ttc", type=float, default=3.0)
     parser.add_argument("--minimum-lateral-speed", type=float, default=0.20)
+    parser.add_argument(
+        "--target-lock-only",
+        action="store_true",
+        help="Analyze only frames where the requested target is locked",
+    )
     return parser.parse_args()
 
 
@@ -321,6 +355,7 @@ def main() -> int:
         config=config,
         frame_width=args.frame_width,
         frame_height=args.frame_height,
+        target_lock_only=args.target_lock_only,
     )
     output_path = args.output or args.tracking_json.with_name(
         f"{args.tracking_json.stem}_risk.json"

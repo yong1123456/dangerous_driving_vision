@@ -1,0 +1,378 @@
+{
+  "schema_version": 3,
+  "updated": "2026-10-13",
+  "policy": {
+    "region": "China",
+    "allowed_for_automatic_test": [
+      "user_saved"
+    ],
+    "training_requirement": "Do not use a clip for training until its dataset or copyright license explicitly permits that use.",
+    "legal_notice": "Labels are review targets, not legal conclusions."
+  },
+  "split_policy": {
+    "training": "Only explicitly licensed and manually reviewed clips may enter training.",
+    "validation": "Use source-disjoint clips for tuning thresholds and geometry.",
+    "external_validation": "May be used to compare tracker or threshold candidates, but never for model training.",
+    "holdout": "Never train, inspect, or tune on holdout clips before reporting generalization results.",
+    "source_isolation": "Clips from the same original uploader, long video, or scene must stay in one split."
+  },
+  "local_evaluation_clips": [
+    {
+      "id": "cn_local_195716",
+      "filename": "\u5c4f\u5e55\u5f55\u5236 2026-09-29 195716.mp4",
+      "source_root": "D:/\u684c\u9762/\u65b0\u5efa\u6587\u4ef6\u5939",
+      "duration_seconds": 9.26,
+      "frame_size": [2560, 1528],
+      "country_evidence": "Chinese overlay text, China-style plates, and right-hand traffic",
+      "review_targets": ["solid_line_crossing"],
+      "quality": "screen_recording",
+      "rights_status": "user_saved_source_needs_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "user_saved_195716"
+    },
+    {
+      "id": "cn_local_195839",
+      "filename": "\u5c4f\u5e55\u5f55\u5236 2026-09-29 195839.mp4",
+      "source_root": "D:/\u684c\u9762/\u65b0\u5efa\u6587\u4ef6\u5939",
+      "duration_seconds": 5.67,
+      "frame_size": [2560, 1528],
+      "country_evidence": "Chinese overlay text and a Chinese expressway scene",
+      "review_targets": ["wrong_way_driving"],
+      "quality": "screen_recording",
+      "rights_status": "user_saved_source_needs_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "user_saved_195839"
+    },
+    {
+      "id": "cn_local_195920",
+      "filename": "\u5c4f\u5e55\u5f55\u5236 2026-09-29 195920.mp4",
+      "source_root": "D:/\u684c\u9762/\u65b0\u5efa\u6587\u4ef6\u5939",
+      "duration_seconds": 5.5,
+      "frame_size": [2560, 1528],
+      "country_evidence": "The report identifies Chengdu, Sichuan and shows a Chinese urban road",
+      "review_targets": ["pedestrian_failure_to_yield"],
+      "quality": "screen_recording_vertical_source",
+      "rights_status": "user_saved_source_needs_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "user_saved_195920"
+    },
+    {
+      "id": "cn_local_200003",
+      "filename": "\u5c4f\u5e55\u5f55\u5236 2026-09-29 200003.mp4",
+      "source_root": "D:/\u684c\u9762/\u65b0\u5efa\u6587\u4ef6\u5939",
+      "duration_seconds": 10.47,
+      "frame_size": [2560, 1528],
+      "country_evidence": "Chinese city signs, blue plates, and right-hand traffic",
+      "review_targets": [
+        "lane_change_without_signal",
+        "consecutive_lane_changes"
+      ],
+      "quality": "screen_recording",
+      "rights_status": "user_saved_source_needs_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "user_saved_200003"
+    },
+    {
+      "id": "ccd_preview_000002",
+      "filename": "C_000002.mp4",
+      "source_root": "D:/桌面/dangerous_driving_test/datasets/ccd/previews",
+      "sha256": "f7b9a38475a3c122e1c578ebad51c2d0d3971143c33a1e4ce84c14f72a86ba37",
+      "duration_seconds": 5.0,
+      "frame_size": [1280, 720],
+      "country_evidence": "CCD mixed-source clip; country not asserted",
+      "review_targets": ["collision_context", "vehicle_tracking", "domain_generalization"],
+      "quality": "dataset_preview",
+      "rights_status": "CCD_dataset_sample_terms_require_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "ccd_preview_batch"
+    },
+    {
+      "id": "ccd_preview_000008",
+      "filename": "C_000008.mp4",
+      "source_root": "D:/桌面/dangerous_driving_test/datasets/ccd/previews",
+      "sha256": "142af9ffa360eb00abf44c9c2f5caa221bc2384b3c5b98dcd628fd0eaea5a0bf",
+      "duration_seconds": 5.0,
+      "frame_size": [1280, 720],
+      "country_evidence": "CCD mixed-source clip; country not asserted",
+      "review_targets": ["collision_context", "vehicle_tracking", "domain_generalization"],
+      "quality": "dataset_preview",
+      "rights_status": "CCD_dataset_sample_terms_require_verification",
+      "use": "evaluation_only",
+      "split": "validation",
+      "source_group": "ccd_preview_batch"
+    }
+  ],
+  "downloaded_sources": [
+    {
+      "id": "commons_chinese_signal_cc0",
+      "title": "Chinese Signal",
+      "publisher": "Wikimedia Commons contributor XZise",
+      "page_url": "https://commons.wikimedia.org/wiki/File:Chinese_Signal.webm",
+      "direct_url": "https://upload.wikimedia.org/wikipedia/commons/3/35/Chinese_Signal.webm",
+      "local_path": "datasets/online_eval/wikimedia/chinese_signal_cc0.webm",
+      "sha256": "c35af0375c12143b6c58b27a0e75e8ea9bbabddca55d1c2197f33fdd2ee2f57b",
+      "duration_seconds": 9.4,
+      "frame_size": [1280, 720],
+      "location": "China",
+      "review_targets": ["traffic_light_state", "red_light_negative_control"],
+      "labels_status": "scene reviewed; no legal-offense ground truth",
+      "rights_status": "CC0-1.0",
+      "use": "evaluation_only",
+      "split": "external_validation",
+      "source_group": "commons_chinese_signal"
+    },
+    {
+      "id": "commons_china_zebra_collision_pd",
+      "title": "Car hits a woman crossing a zebra crossing and another vehicle",
+      "publisher": "Wikimedia Commons public-domain traffic-camera source",
+      "page_url": "https://commons.wikimedia.org/wiki/File:The_car_hit_the_woman_crossing_the_zebra_crossing_and_the_white_car_on_the_left_at_the_exit_of_the_roundabout_at_the_same_time.webm",
+      "direct_url": "https://upload.wikimedia.org/wikipedia/commons/7/7c/The_car_hit_the_woman_crossing_the_zebra_crossing_and_the_white_car_on_the_left_at_the_exit_of_the_roundabout_at_the_same_time.webm",
+      "local_path": "datasets/online_eval/wikimedia/china_zebra_crossing_collision_pd.webm",
+      "sha256": "cb8d77658f713b9cf79e08dfd6dd643652348b10644f1ba37da05fb0839be47e",
+      "duration_seconds": 26.867,
+      "frame_size": [960, 544],
+      "location": "China",
+      "review_targets": ["pedestrian_failure_to_yield", "crosswalk_conflict", "collision_context"],
+      "labels_status": "title-level event description; frame-level legal labels not provided",
+      "rights_status": "public_domain",
+      "use": "evaluation_only",
+      "split": "external_validation",
+      "source_group": "commons_china_zebra_collision"
+    }
+  ],
+  "open_video_candidates": [
+    {
+      "id": "commons_shanghai_elevated_wrong_way_pd",
+      "title": "Car turns around and drives in the opposite direction at a Shanghai elevated exit",
+      "publisher": "Wikimedia Commons public-domain traffic-camera source",
+      "page_url": "https://commons.wikimedia.org/wiki/File:The_car_ahead_turned_around_and_drove_in_the_opposite_direction_at_the_Shanghai_elevated_exit.webm",
+      "direct_url": "https://upload.wikimedia.org/wikipedia/commons/2/2f/The_car_ahead_turned_around_and_drove_in_the_opposite_direction_at_the_Shanghai_elevated_exit.webm",
+      "local_path": "datasets/online_eval/wikimedia/holdout/shanghai_elevated_wrong_way_pd.webm",
+      "duration_seconds": null,
+      "location": "Shanghai, China",
+      "review_targets": ["wrong_way_driving"],
+      "rights_status": "public_domain",
+      "download_status": "remote_candidate_download_interrupted_by_slow_mirror; retry timed out 2026-10-13",
+      "use": "manual_review_candidate",
+      "split": "holdout_candidate"
+    },
+    {
+      "id": "commons_china_repeated_wrong_way_pd",
+      "title": "Older driver drives the wrong way three times before a collision",
+      "publisher": "Wikimedia Commons public-domain traffic-camera source",
+      "page_url": "https://commons.wikimedia.org/wiki/File:拿性命当儿戏！六旬老汉三次逆向行驶终被撞昏迷.webm",
+      "direct_url": "https://upload.wikimedia.org/wikipedia/commons/5/5a/%E6%8B%BF%E6%80%A7%E5%91%BD%E5%BD%93%E5%84%BF%E6%88%8F%EF%BC%81%E5%85%AD%E6%97%AC%E8%80%81%E6%B1%89%E4%B8%89%E6%AC%A1%E9%80%86%E5%90%91%E8%A1%8C%E9%A9%B6%E7%BB%88%E8%A2%AB%E6%92%9E%E6%98%8F%E8%BF%B7.webm",
+      "local_path": "datasets/online_eval/wikimedia/holdout/china_repeated_wrong_way_pd.webm",
+      "location": "China",
+      "review_targets": ["wrong_way_driving", "collision_context"],
+      "rights_status": "public_domain",
+      "download_status": "remote_candidate_download_interrupted_by_slow_mirror; retry timed out 2026-10-13",
+      "use": "manual_review_candidate",
+      "split": "holdout_candidate"
+    }
+  ],
+  "official_video_candidates": [
+    {
+      "id": "cctv_red_light_shanghai_2017",
+      "title": "Shanghai: three trucks run a red light; dashcam records the dangerous moment",
+      "publisher": "CCTV-12",
+      "page_url": "https://tv.cctv.com/2017/10/10/VIDEP501nkVhE7Vejcw6sXkH171010.shtml",
+      "duration_seconds": 69,
+      "location": "Shanghai, China",
+      "review_targets": ["red_light_running"],
+      "rights_status": "copyrighted_news_page_no_training_license_found",
+      "use": "manual_review_candidate"
+    },
+    {
+      "id": "cctv_littering_wuhan_2012",
+      "title": "Wuhan citizen video report of littering from a vehicle",
+      "publisher": "CCTV-13",
+      "page_url": "https://tv.cctv.com/2012/12/17/VIDE1355718952149887.shtml",
+      "duration_seconds": 152,
+      "location": "Wuhan, Hubei, China",
+      "review_targets": ["littering_from_vehicle"],
+      "rights_status": "copyrighted_news_page_no_training_license_found",
+      "use": "manual_review_candidate"
+    }
+  ],
+  "public_dataset_candidates": [
+    {
+      "id": "d2_city",
+      "name": "D2-City",
+      "official_reference": "https://arxiv.org/abs/1904.01975",
+      "china_scope": "More than 10,000 dashcam clips from real traffic scenarios in China",
+      "annotations": "Object detection and tracking; no traffic-offense labels",
+      "fit": ["vehicle_detection", "vehicle_tracking", "domain_adaptation"],
+      "access_status": "dataset_download_and_terms_require_separate_verification"
+    },
+    {
+      "id": "apolloscape",
+      "name": "ApolloScape",
+      "official_reference": "https://github.com/ApolloScapeAuto/dataset-api",
+      "china_scope": "Chinese autonomous-driving road data",
+      "annotations": "Lane segmentation, scene parsing, 3D tracking, and trajectories",
+      "fit": ["lane_segmentation", "road_geometry", "vehicle_tracking"],
+      "access_status": "toolkit_is_apache_2_0_but_dataset_terms_must_be_checked_separately"
+    },
+    {
+      "id": "dair_v2x",
+      "name": "DAIR-V2X / V2X-Seq",
+      "official_reference": "https://github.com/AIR-THU/DAIR-V2X",
+      "china_scope": "Real-world vehicle and infrastructure views captured in China, including traffic lights and sequential scenarios",
+      "annotations": "3D objects, trajectories, maps, and traffic-light-related scenario data; not traffic-violation labels",
+      "fit": ["vehicle_detection", "vehicle_tracking", "traffic_light_context", "trajectory_modeling"],
+      "license_status": "repository_code_apache_2_0; dataset_terms_and_access_must_be_verified_on_official_project_page",
+      "access_status": "official_example_download_is_available; full_dataset_terms_require_separate_verification"
+    },
+    {
+      "id": "culane",
+      "name": "CULane",
+      "official_reference": "https://xingangpan.github.io/projects/CULane.html",
+      "china_scope": "Road scenes collected in Beijing, China",
+      "annotations": "Lane-line annotations; no traffic-violation labels",
+      "fit": ["lane_segmentation", "road_geometry", "solid_line_context"],
+      "license_status": "dataset_license_requires_verification_from_official_page",
+      "access_status": "public_research_dataset_candidate"
+    },
+    {
+      "id": "dada_2000",
+      "name": "DADA-2000",
+      "official_reference": "https://github.com/JWFangit/LOTVS-DADA",
+      "china_scope": "Driving accident and attention videos; country and source rights vary by clip",
+      "annotations": "Driving anomaly/accident categories and attention annotations; not the seven target offenses",
+      "fit": ["anomaly_detection", "night_scene_robustness", "hard_negative_review"],
+      "license_status": "download_page_provided_by_project; redistribution_and_training_terms_require_verification",
+      "access_status": "large_download_candidate_not_automatically_downloaded"
+    },
+    {
+      "id": "dota",
+      "name": "DoTA",
+      "official_reference": "https://github.com/MoonBlvd/Detection-of-Traffic-Anomaly",
+      "china_scope": "Driving videos sourced from public channels; not China-only",
+      "annotations": "Traffic-anomaly temporal labels, object tracks, and optical-flow features; no China-specific legal labels",
+      "fit": ["anomaly_detection", "temporal_hard_negatives", "vehicle_tracking"],
+      "license_status": "project states permission was obtained to share downloaded clips; verify current terms before training or redistribution",
+      "access_status": "annotations_present_locally_but_video_archive_not_present"
+    },
+    {
+      "id": "s2tld",
+      "name": "SJTU Small Traffic Light Dataset (S2TLD)",
+      "official_reference": "https://github.com/Thinklab-SJTU/S2TLD",
+      "china_scope": "Released by Shanghai Jiao Tong University; exact capture locations must be verified before claiming China-only coverage",
+      "annotations": "5,786 road images and 14,130 traffic-light instances labeled red, yellow, green, off, and wait-on",
+      "fit": ["traffic_light_detection", "traffic_light_state", "small_object_detection"],
+      "license_status": "repository_is_MIT; verify that the same terms cover downloaded dataset images",
+      "access_status": "official_download_links_available"
+    },
+    {
+      "id": "ccd",
+      "name": "Car Crash Dataset (CCD)",
+      "official_reference": "https://github.com/Cogito2012/CarCrashDataset",
+      "china_scope": "Mixed-source YouTube crash clips plus BDD100K normal clips; not China-only",
+      "annotations": "1,500 accident clips, 3,000 normal clips, frame-level accident timing, weather, day/night, participants, and causes",
+      "fit": ["collision_context", "anomaly_detection", "night_scene_robustness", "hard_negatives"],
+      "license_status": "repository_is_MIT; source-video and dataset reuse terms require separate verification",
+      "access_status": "google_drive_dataset_available"
+    },
+    {
+      "id": "bdd100k",
+      "name": "BDD100K",
+      "official_reference": "https://github.com/bdd100k/bdd100k",
+      "china_scope": "Large diverse driving dataset, primarily not China-specific",
+      "annotations": "100,000 driving videos with detection, lane, drivable-area, tracking, and other task labels",
+      "fit": ["vehicle_detection", "vehicle_tracking", "lane_detection", "weather_and_time_diversity", "hard_negatives"],
+      "license_status": "dataset terms must be accepted on the official download site",
+      "access_status": "registration_and_large_download_required"
+    },
+    {
+      "id": "ua_detrac",
+      "name": "UA-DETRAC",
+      "official_reference": "https://detrac-db.rit.albany.edu/",
+      "china_scope": "Traffic-surveillance videos recorded in Beijing and Tianjin",
+      "annotations": "100 challenging traffic videos with vehicle boxes, tracks, weather, occlusion, and vehicle attributes",
+      "fit": ["vehicle_detection", "vehicle_tracking", "rain_and_night_robustness", "surveillance_view_generalization"],
+      "license_status": "research dataset terms require verification before download or training",
+      "access_status": "official_site_candidate"
+    },
+    {
+      "id": "rope3d",
+      "name": "Rope3D",
+      "official_reference": "https://github.com/liyingying0113/rope3d-dataset-tools",
+      "china_scope": "Chinese roadside-camera data; official repository notes downloads are currently restricted to China-region access",
+      "annotations": "50,000 images and more than 1.5 million 3D objects across cameras, viewpoints, and weather",
+      "fit": ["roadside_vehicle_detection", "camera_pose_robustness", "weather_generalization"],
+      "license_status": "tooling_is_Apache-2.0; dataset terms require verification",
+      "access_status": "china_region_download_candidate"
+    }
+  ],
+  "search_registry": [
+    {
+      "id": "github_air_thu_dair_v2x",
+      "url": "https://github.com/AIR-THU/DAIR-V2X",
+      "checked_at": "2026-10-11",
+      "result": "Chinese real-world V2X data and official devkit; useful for traffic-light context and tracking, not direct offense training"
+    },
+    {
+      "id": "github_culane_project",
+      "url": "https://xingangpan.github.io/projects/CULane.html",
+      "checked_at": "2026-10-11",
+      "result": "Beijing lane dataset; useful for lane geometry, but license and offense labels require separate verification"
+    },
+    {
+      "id": "github_dada_2000",
+      "url": "https://github.com/JWFangit/LOTVS-DADA",
+      "checked_at": "2026-10-11",
+      "result": "Large accident/attention benchmark; use as anomaly and hard-negative source only after terms review"
+    },
+    {
+      "id": "github_dota",
+      "url": "https://github.com/MoonBlvd/Detection-of-Traffic-Anomaly",
+      "checked_at": "2026-10-11",
+      "result": "Temporal traffic-anomaly benchmark; not China-only and not a legal-offense dataset"
+    },
+    {
+      "id": "github_s2tld",
+      "url": "https://github.com/Thinklab-SJTU/S2TLD",
+      "checked_at": "2026-10-13",
+      "result": "Traffic-light small-object dataset with five states; useful for perception, not red-light-violation labels"
+    },
+    {
+      "id": "github_ccd",
+      "url": "https://github.com/Cogito2012/CarCrashDataset",
+      "checked_at": "2026-10-13",
+      "result": "1,500 crash and 3,000 normal short videos with day/night and weather diversity; source rights need review"
+    },
+    {
+      "id": "wikimedia_commons_china_road_search",
+      "url": "https://commons.wikimedia.org/",
+      "checked_at": "2026-10-13",
+      "result": "Found CC0/public-domain China traffic-light, crosswalk-conflict, and wrong-way candidates; two clips downloaded and checksum-verified"
+    },
+    {
+      "id": "github_paddle_ppvehicle_retrograde",
+      "url": "https://github.com/PaddlePaddle/PaddleDetection/blob/develop/deploy/pipeline/docs/tutorials/ppvehicle_retrograde.md",
+      "checked_at": "2026-10-13",
+      "result": "Apache-2.0 implementation reference for lane-aware wrong-way detection; linked GIF is only 0.96 seconds and already annotated, so it was rejected as a holdout video"
+    },
+    {
+      "id": "github_wrong_way_video_replacement_search",
+      "url": "https://api.github.com/search/repositories",
+      "checked_at": "2026-10-13",
+      "result": "Repositories with explicit MIT licenses contained no test videos; the repository containing a 19.5 MB wrong-way video had no license and an unverified non-China scene, so no replacement was admitted"
+    }
+  ],
+  "coverage": {
+    "solid_line_crossing": "local_evaluation_available",
+    "wrong_way_driving": "local_evaluation_available_and_public_domain_remote_candidates",
+    "pedestrian_failure_to_yield": "local_and_public_domain_external_validation_available",
+    "lane_change_without_signal": "local_evaluation_available",
+    "consecutive_lane_changes": "local_evaluation_available",
+    "red_light_running": "official_candidate_plus_cc0_signal_context_external_validation",
+    "littering_from_vehicle": "official_candidate_only"
+  }
+}

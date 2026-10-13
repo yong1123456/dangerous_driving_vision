@@ -36,6 +36,7 @@ class OffenseConfig:
     minimum_wrong_way_seconds: float = 1.0
     minimum_crosswalk_confidence: float = 0.75
     minimum_crosswalk_observations: int = 3
+    crosswalk_event_merge_seconds: float = 1.0
     require_valid_road_context: bool = True
 
     @classmethod
@@ -63,6 +64,7 @@ class OffenseConfig:
             ),
             "maximum_context_pan_offset_deg": self.maximum_context_pan_offset_deg,
             "minimum_wrong_way_seconds": self.minimum_wrong_way_seconds,
+            "crosswalk_event_merge_seconds": self.crosswalk_event_merge_seconds,
         }
         for name, value in positive.items():
             if value <= 0:
@@ -791,7 +793,7 @@ def pedestrian_failure_to_yield_events(
                 )
             ].append(observation)
 
-    events: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for (vehicle_id, pedestrian_id, crosswalk_id), group in grouped.items():
         runs: list[list[CrosswalkInteractionObservation]] = []
         current_run: list[CrosswalkInteractionObservation] = []
@@ -815,7 +817,8 @@ def pedestrian_failure_to_yield_events(
             ):
                 continue
             first, last = run[0], run[-1]
-            events.append(
+            confidence_sum = sum(item.confidence for item in run)
+            candidates.append(
                 {
                     "type": "pedestrian_failure_to_yield",
                     "status": "suspected",
@@ -827,13 +830,77 @@ def pedestrian_failure_to_yield_events(
                     "end_seconds": round(last.timestamp, 3),
                     "evidence": {
                         "pedestrian_track_id": pedestrian_id,
+                        "pedestrian_track_ids": [pedestrian_id],
                         "crosswalk_id": crosswalk_id,
+                        "merged_candidate_count": 1,
                         "observation_count": len(run),
                         "crossing_frame": crossed[0].frame,
                         "vehicle_stopped_before_crosswalk": False,
+                        "maximum_confidence": round(
+                            max(item.confidence for item in run), 3
+                        ),
+                        "mean_confidence": round(
+                            confidence_sum / len(run), 3
+                        ),
                     },
+                    "_confidence_sum": confidence_sum,
                 }
             )
+
+    grouped_candidates: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    for candidate in candidates:
+        grouped_candidates[
+            (candidate["track_id"], candidate["evidence"]["crosswalk_id"])
+        ].append(candidate)
+
+    events: list[dict[str, Any]] = []
+    for group in grouped_candidates.values():
+        group.sort(key=lambda event: (event["start_seconds"], event["start_frame"]))
+        current: dict[str, Any] | None = None
+        for candidate in group:
+            if current is None:
+                current = candidate
+                continue
+            gap_seconds = candidate["start_seconds"] - current["end_seconds"]
+            if gap_seconds > config.crosswalk_event_merge_seconds:
+                events.append(current)
+                current = candidate
+                continue
+
+            current["end_frame"] = max(current["end_frame"], candidate["end_frame"])
+            current["end_seconds"] = max(
+                current["end_seconds"], candidate["end_seconds"]
+            )
+            evidence = current["evidence"]
+            candidate_evidence = candidate["evidence"]
+            evidence["pedestrian_track_ids"] = list(
+                dict.fromkeys(
+                    evidence["pedestrian_track_ids"]
+                    + candidate_evidence["pedestrian_track_ids"]
+                )
+            )
+            evidence["merged_candidate_count"] += candidate_evidence[
+                "merged_candidate_count"
+            ]
+            evidence["observation_count"] += candidate_evidence[
+                "observation_count"
+            ]
+            evidence["crossing_frame"] = min(
+                evidence["crossing_frame"], candidate_evidence["crossing_frame"]
+            )
+            evidence["maximum_confidence"] = max(
+                evidence["maximum_confidence"],
+                candidate_evidence["maximum_confidence"],
+            )
+            current["_confidence_sum"] += candidate["_confidence_sum"]
+            evidence["mean_confidence"] = round(
+                current["_confidence_sum"] / evidence["observation_count"], 3
+            )
+        if current is not None:
+            events.append(current)
+
+    for event in events:
+        event.pop("_confidence_sum", None)
     return events
 
 

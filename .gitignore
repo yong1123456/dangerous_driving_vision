@@ -6,6 +6,7 @@ __pycache__/
 # Runtime output and evidence must not be committed.
 recordings/
 logs/
+cpu_lock_test/
 
 # Models and datasets are large and may have separate licenses.
 models/

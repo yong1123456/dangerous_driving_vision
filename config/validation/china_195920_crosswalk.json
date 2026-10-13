@@ -1,0 +1,48 @@
+{
+  "image_width": 2560,
+  "image_height": 1528,
+  "normalized": true,
+  "validation_only": true,
+  "notes": "Manual calibration for a low-resolution Chinese-road screen recording. Recalibrate for any other camera or crop.",
+  "camera_pose": {
+    "mode": "road_context",
+    "pan_degrees": 0.0,
+    "tilt_degrees": 0.0,
+    "pan_rate_deg_s": 0.0,
+    "tilt_rate_deg_s": 0.0,
+    "calibrated": true,
+    "road_transform_valid": true,
+    "confidence": 0.9
+  },
+  "crosswalks": [
+    {
+      "id": "chengdu_crosswalk_01",
+      "confidence": 0.9,
+      "minimum_vehicle_confidence": 0.15,
+      "minimum_pedestrian_confidence": 0.15,
+      "motion_window_seconds": 0.3,
+      "minimum_vehicle_motion_per_second": 0.01,
+      "stopped_motion_per_second": 0.003,
+      "stop_hold_seconds": 0.5,
+      "stop_lookback_seconds": 2.0,
+      "pedestrian_zone": [
+        [0.35, 0.5],
+        [0.66, 0.5],
+        [0.66, 0.61],
+        [0.35, 0.61]
+      ],
+      "vehicle_conflict_zone": [
+        [0.48, 0.59],
+        [0.68, 0.59],
+        [0.68, 0.68],
+        [0.45, 0.68]
+      ],
+      "vehicle_approach_zone": [
+        [0.45, 0.53],
+        [0.7, 0.53],
+        [0.7, 0.68],
+        [0.43, 0.68]
+      ]
+    }
+  ]
+}

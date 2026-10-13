@@ -281,6 +281,68 @@ class OffenseAnalyzerTest(unittest.TestCase):
 
         self.assertEqual(result["event_counts"]["pedestrian_failure_to_yield"], 1)
 
+    def test_crosswalk_event_merges_pedestrian_id_changes(self) -> None:
+        records = []
+        for pedestrian_id, start_time in ((11, 0.0), (22, 0.8)):
+            for offset in range(3):
+                records.append(
+                    {
+                        "frame": int((start_time + offset / 10) * 10) + 1,
+                        "timestamp_seconds": start_time + offset / 10,
+                        "camera_pose": stable_camera_pose(),
+                        "crosswalk_interactions": [
+                            {
+                                "vehicle_track_id": 5,
+                                "pedestrian_track_id": pedestrian_id,
+                                "crosswalk_id": "crosswalk_a",
+                                "pedestrian_has_priority": True,
+                                "vehicle_crossed_crosswalk": True,
+                                "vehicle_stopped_before_crosswalk": False,
+                                "confidence": 0.9,
+                            }
+                        ],
+                    }
+                )
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_counts"]["pedestrian_failure_to_yield"], 1)
+        evidence = result["events"][0]["evidence"]
+        self.assertEqual(evidence["pedestrian_track_id"], 11)
+        self.assertEqual(evidence["pedestrian_track_ids"], [11, 22])
+        self.assertEqual(evidence["merged_candidate_count"], 2)
+        self.assertEqual(evidence["observation_count"], 6)
+
+    def test_crosswalk_event_does_not_merge_different_vehicles(self) -> None:
+        records = []
+        for vehicle_id in (5, 8):
+            for offset in range(3):
+                records.append(
+                    {
+                        "frame": offset + 1,
+                        "timestamp_seconds": offset / 10,
+                        "camera_pose": stable_camera_pose(),
+                        "crosswalk_interactions": [
+                            {
+                                "vehicle_track_id": vehicle_id,
+                                "pedestrian_track_id": 11,
+                                "crosswalk_id": "crosswalk_a",
+                                "pedestrian_has_priority": True,
+                                "vehicle_crossed_crosswalk": True,
+                                "vehicle_stopped_before_crosswalk": False,
+                                "confidence": 0.9,
+                            }
+                        ],
+                    }
+                )
+
+        result = analyze_scene({"frame_records": records}, self.config)
+
+        self.assertEqual(result["event_counts"]["pedestrian_failure_to_yield"], 2)
+        self.assertEqual(
+            {event["track_id"] for event in result["events"]}, {5, 8}
+        )
+
     def test_target_follow_mode_suppresses_road_geometry_rules(self) -> None:
         pose = stable_camera_pose()
         pose["mode"] = "target_follow"

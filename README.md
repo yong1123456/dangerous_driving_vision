@@ -82,6 +82,40 @@ third_party/supervision_bytetrack。香橙派虚拟环境需要 SciPy 1.11.4。
 使用 `--frames 100` 可以只处理前 100 帧，使用 `--output` 可以指定输出 MP4
 路径。每帧的时间、车辆框、类别、置信度和跟踪 ID 会写入同名 JSON 文件。
 
+### 锁定一辆目标车
+
+跟踪 ID 是第一遍跟踪产生的编号。需要锁定目标时，先完成普通跟踪，查看同名
+JSON 或标注视频中的 `track_id`，再用该 ID 重跑：
+
+    python src/vehicle_tracker.py --video recordings/test_inputs/input.mp4 \
+        --target-track-id 12 --lock-confirm-frames 3 --target-max-missed 10 \
+        --output recordings/input_target12.mp4
+
+也可以按第一帧画面坐标选择车辆（坐标原点在左上角）：
+
+    python src/vehicle_tracker.py --video recordings/test_inputs/input.mp4 \
+        --target-point 960,540 --output recordings/input_target.mp4
+
+目标必须连续出现 `--lock-confirm-frames` 帧才会变成 `locked`。短时检测失败时，
+状态变为 `temporarily_lost`，程序最多保持 `--target-max-missed` 帧；重新关联必须满足
+位置和 IoU 条件，两个候选同样接近时保持原目标并等待，不会随意换车。超过容忍帧数
+后状态为 `lost`，不会自动锁定另一辆车。输出视频会用红框标出已锁定目标，JSON 每帧
+包含 `target_lock`（状态、目标 ID、框、丢失帧数和匹配方式）。
+
+需要更保守地防止换车时，可显式设置：
+
+    --reassociation-confirm-frames 2 --max-reassociation-gap 3 \
+    --target-min-match-score 0.35 --target-min-match-margin 0.10 \
+    --target-max-area-change 2.25
+
+其中 `max-reassociation-gap` 限制允许尝试换 ID 的丢失帧数；超过该值直接进入
+`lost`。可靠性优先时应保持较小的值，宁可报告目标丢失，也不要自动跳到另一辆车。
+
+要锁定“疑似违法车辆”，先运行普通跟踪和 `risk_analyzer.py`，从风险报告的事件中
+人工确认 `track_id`，再用 `--target-track-id` 重跑。运动风险候选不能直接证明违法；
+压实线、闯红灯、未礼让、不打灯等规则还必须有经过标定的车道、信号灯、转向灯和
+行人观测，最终结果仍需人工复核。
+
 ## 轨迹风险分析（电脑或香橙派）
 
 风险分析器读取跟踪 JSON，筛选“快速接近”和“快速横向移动”候选片段，不需要
@@ -119,6 +153,34 @@ RKNN、摄像头或 SciPy。新生成的跟踪 JSON 已包含画面宽高：
 
 ## 多类疑似违法行为分析
 
+中国道路素材和公开数据源登记在 `config/china_video_catalog.json`。来源审计：
+
+已核验的开源组件、固定提交版本、许可证和能力缺口登记在
+`config/open_source_components.json`，详细筛选结论见
+`docs/open_source_traffic_violation_references.md`。PaddleDetection
+PP-Vehicle 的压线、逆行和车道数据处理源码已带许可证保存在
+`third_party/traffic_violation_references/paddledetection_ppvehicle_apache2`。
+
+    python scripts/audit_video_catalog.py --no-hash
+
+重新检索 GitHub 候选来源（只登记搜索结果，不自动下载）：
+
+    python scripts/search_public_sources.py --output recordings/public_source_search.json
+
+批量运行已有本地中国道路评估片段：
+
+    python scripts/run_china_validation_suite.py --output-dir D:/桌面/dangerous_driving_test/china_validation_results --dry-run
+
+只跑新增的开放许可外部验证集：
+
+    python scripts/run_china_validation_suite.py --output-dir recordings/online_validation --id commons_chinese_signal_cc0 --id commons_china_zebra_collision_pd --device 0 --scene-context
+
+比较候选交通跟踪参数时显式增加：
+
+    --tracker config/bytetrack_traffic.yaml
+
+公开数据集用于补充车辆、车道、交通灯和异常场景感知；它们没有自动产生本项目七类违法标签。公开视频或新闻页面默认只能做人工评估，只有明确许可或自采并授权的数据才可训练。
+
 `src/offense_analyzer.py` 已实现以下时序规则：
 
 - 车辆完成变道，但变道前后没有检测到对应方向的转向灯；
@@ -137,3 +199,24 @@ RKNN、摄像头或 SciPy。新生成的跟踪 JSON 已包含画面宽高：
 `config/offense_rules.json`。当前 YOLOv8n 车辆模型只能提供车辆框；车道线、转向灯、
 信号灯与停止线关联、道路边界、行人优先权和抛出物检测仍需要对应的视觉模型，不能由规则引擎
 凭空推断。所有输出都是疑似违法行为和证据片段，必须人工复核，不能直接作为法律定责。
+
+### 当前可运行的道路几何离线验证
+
+`src/road_offense_pipeline.py` 可将车辆跟踪 JSON 与人工标定的道路边界组合，生成规则引擎
+所需的场景观测，并检测持续跨越已标注实线的候选事件。先用 `vehicle_tracker.py` 对视频
+生成跟踪 JSON，再复制 `config/road_geometry.example.json`，按该视频画面修改标定文件：
+
+    python src/vehicle_tracker.py --video recordings/test_inputs/input.mp4 \
+        --output recordings/input_tracked.mp4
+    python src/road_offense_pipeline.py recordings/input_tracked.json \
+        --geometry config/road_geometry.json
+
+实际跟踪 JSON 文件名以程序输出为准。边界点按画面从左到右排列；`normalized: true` 时坐标
+使用 0 到 1 的画面比例。至少标出道路左右边界和需要判断的车道线，点要沿着可见线段由下往上
+选取。输出的 `*_scene_observations.json` 和 `*_offenses.json` 默认写在跟踪 JSON 所在目录；
+后者包含 `selected_offender`，无满足条件的规则事件时状态为 `NO_CONFIDENT_OFFENDER`。
+
+此验证器不自动检测车道线，也不适用于摄像头平移、俯仰或云台跟随期间直接套用固定画面标定。
+车道线被遮挡、透视变化明显或边界标错时，不应采信候选结果。转向灯、红绿灯、停止线、行人
+与斑马线、逆行方向及抛出物仍需可靠的感知观测；没有这些观测时对应规则不会产生结论。输出仅
+用于视频复核与研发验证，不构成违法认定或执法证据。

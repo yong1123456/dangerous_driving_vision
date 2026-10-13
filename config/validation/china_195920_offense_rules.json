@@ -1,0 +1,5 @@
+{
+  "minimum_crosswalk_confidence": 0.15,
+  "minimum_crosswalk_observations": 3,
+  "crosswalk_event_merge_seconds": 1.0
+}

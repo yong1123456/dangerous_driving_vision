@@ -100,6 +100,34 @@ class RiskAnalyzerTest(unittest.TestCase):
 
         self.assertEqual(result["event_count"], 0)
 
+    def test_target_lock_scope_ignores_other_tracks_and_normalizes_reassociation(self) -> None:
+        summary = make_summary([(400, 200, 500, 300)] * 2)
+        summary["target_lock_config"] = {"target_track_id": 3}
+        summary["frame_records"][0]["tracks"] = [
+            {"track_id": 3, "label": "car", "confidence": 0.9, "box": [400, 200, 500, 300]},
+            {"track_id": 50, "label": "car", "confidence": 0.9, "box": [0, 0, 300, 300]},
+        ]
+        summary["frame_records"][0]["target_lock"] = {
+            "state": "locked",
+            "target_track_id": 3,
+        }
+        summary["frame_records"][1]["tracks"] = [
+            {"track_id": 9, "label": "car", "confidence": 0.9, "box": [402, 200, 502, 300]},
+            {"track_id": 50, "label": "car", "confidence": 0.9, "box": [0, 0, 500, 400]},
+        ]
+        summary["frame_records"][1]["target_lock"] = {
+            "state": "locked",
+            "target_track_id": 9,
+            "match_method": "reassociated",
+        }
+
+        result = analyze_tracking(summary, target_lock_only=True)
+
+        self.assertEqual(result["analysis_scope"], "target_lock")
+        self.assertEqual(result["track_count"], 1)
+        self.assertEqual(result["observation_count"], 2)
+        self.assertEqual(result["event_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

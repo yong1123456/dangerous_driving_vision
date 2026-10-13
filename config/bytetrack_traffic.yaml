@@ -1,0 +1,8 @@
+# Conservative association for road videos with short occlusions.
+tracker_type: bytetrack
+track_high_thresh: 0.30
+track_low_thresh: 0.10
+new_track_thresh: 0.35
+track_buffer: 60
+match_thresh: 0.85
+fuse_score: true

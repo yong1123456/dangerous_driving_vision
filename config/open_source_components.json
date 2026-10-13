@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-10-13",
+  "acceptance_rule": "A reusable component must expose implementation code and an explicit license. README claims alone do not count.",
+  "accepted": [
+    {
+      "repository": "PaddlePaddle/PaddleDetection",
+      "url": "https://github.com/PaddlePaddle/PaddleDetection",
+      "commit": "b25522a0f4bde8c80603f3ba5e3472059972e3b5",
+      "license": "Apache-2.0",
+      "covers": ["solid_line_crossing", "wrong_way_driving", "lane_segmentation", "vehicle_tracking"],
+      "local_copy": "third_party/traffic_violation_references/paddledetection_ppvehicle_apache2",
+      "status": "recommended_primary_reference",
+      "limitations": "Paddle inference models require conversion and validation before RK3588/RKNN deployment."
+    },
+    {
+      "repository": "cfzd/Ultra-Fast-Lane-Detection-v2",
+      "url": "https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2",
+      "commit": "c903880678454dfd9b55a63022368db05c00bc6d",
+      "license": "MIT",
+      "covers": ["lane_detection"],
+      "status": "model_candidate",
+      "limitations": "Detects lane geometry but contains no traffic-offense decision logic or RKNN deployment."
+    },
+    {
+      "repository": "hustvl/YOLOP",
+      "url": "https://github.com/hustvl/YOLOP",
+      "commit": "8d8f68df318c71f01d6f813c024df646c7d1978f",
+      "license": "MIT",
+      "covers": ["vehicle_detection", "drivable_area_segmentation", "lane_detection"],
+      "status": "model_candidate",
+      "limitations": "Provides perception only; its older model and non-China training distribution require local validation."
+    },
+    {
+      "repository": "openvinotoolkit/open_model_zoo",
+      "url": "https://github.com/openvinotoolkit/open_model_zoo",
+      "commit": "eda1863a6d60b09551df9d039cff2377d6ddd4d6",
+      "license": "Apache-2.0",
+      "covers": ["vehicle_detection", "pedestrian_detection", "traffic_light_detection", "tracking"],
+      "status": "desktop_reference",
+      "limitations": "OpenVINO targets Intel hardware and does not provide offense rules or direct RK3588 deployment."
+    },
+    {
+      "repository": "ifzhang/ByteTrack",
+      "url": "https://github.com/ifzhang/ByteTrack",
+      "commit": "d1bf0191adff59bc8fcfeaa0b33d3d1642552a99",
+      "license": "MIT",
+      "covers": ["multi_object_tracking"],
+      "status": "algorithm_reference",
+      "limitations": "Tracking alone cannot determine a traffic offense. The project already vendors Supervision's ByteTrack implementation."
+    },
+    {
+      "repository": "kunal-gandvane/Red_Light_Violation_Detection",
+      "url": "https://github.com/kunal-gandvane/Red_Light_Violation_Detection",
+      "commit": "44d73402a0d9eb0008609ebe37d8207b848aa700",
+      "license": "BSD-3-Clause",
+      "covers": ["red_light_running", "evidence_clip"],
+      "local_copy": "third_party/traffic_violation_references/red_light_bsd",
+      "status": "workflow_reference",
+      "limitations": "Uses a manually configured violation region and does not by itself prove correct signal-to-lane association."
+    },
+    {
+      "repository": "Umraz-Hussain-MyWorld/Smart-Vehicle-WrongWay-Detection-And-Tracking",
+      "url": "https://github.com/Umraz-Hussain-MyWorld/Smart-Vehicle-WrongWay-Detection-And-Tracking",
+      "commit": "21936559a931867981cbc090bf7dad4c71ad2fd0",
+      "license": "MIT",
+      "covers": ["wrong_way_driving", "tracking", "evidence_snapshot"],
+      "local_copy": "third_party/traffic_violation_references/wrong_way_mit",
+      "status": "workflow_reference",
+      "limitations": "Direction thresholds and road geometry still require scene calibration."
+    }
+  ],
+  "not_reusable": [
+    {
+      "repository": "opl1127/DL2024_Team11_Detection_of_Turn_Signal_Usage_in_Vehicles_at_Intersections",
+      "reason": "Contains three Python files and a best.pt model, but no license. It cannot be copied or integrated without permission."
+    },
+    {
+      "repository": "VIKASHlm/Trash-detection-in-highways-using-MobileNet-SSD-and-CNN",
+      "reason": "Contains only five small files and no license, dataset or validated model artifact."
+    },
+    {
+      "repository": "LakshaySinghal44/Smart-Litter-Detection-System-from-Moving-Vehicles",
+      "reason": "Contains six files and no reusable license. Its repository metadata reports NOASSERTION."
+    },
+    {
+      "repository": "qiekuo/Visual-recognition-AI",
+      "reason": "README describes a large multi-service system, but the repository tree has only 16 files, lacks the claimed core packages, and has no license."
+    }
+  ]
+}
