@@ -93,6 +93,85 @@ def crosswalk_geometry(*, confidence: float = 0.9) -> dict:
     }
 
 
+def signal_tracking(state: str = "red", confidence: float = 0.95) -> dict:
+    records = []
+    vehicle_bottoms = [180, 190, 200, 210, 220, 230, 240, 265, 280]
+    for index, bottom in enumerate(vehicle_bottoms):
+        records.append(
+            {
+                "frame": index + 1,
+                "timestamp_seconds": index / 10,
+                "tracks": [
+                    {
+                        "track_id": 5,
+                        "label": "car",
+                        "confidence": 0.9,
+                        "box": [200, bottom - 80, 260, bottom],
+                    },
+                    {
+                        "track_id": 40,
+                        "label": "traffic_light",
+                        "confidence": 0.9,
+                        "box": [360, 30, 400, 100],
+                        "traffic_light_state": state,
+                        "traffic_light_state_confidence": confidence,
+                    },
+                ],
+            }
+        )
+    return {
+        "source_video": "intersection.mp4",
+        "source_fps": 10.0,
+        "frame_width": 800,
+        "frame_height": 400,
+        "frame_records": records,
+    }
+
+
+def signal_geometry() -> dict:
+    return {
+        "camera_pose": {
+            "mode": "road_context",
+            "calibrated": True,
+            "road_transform_valid": True,
+            "confidence": 0.95,
+        },
+        "boundaries": [
+            {"id": "left", "type": "dashed", "points": [[100, 400], [100, 100]]},
+            {"id": "middle", "type": "dashed", "points": [[300, 400], [300, 100]]},
+            {"id": "right", "type": "dashed", "points": [[600, 400], [600, 100]]},
+        ],
+        "traffic_signals": [
+            {
+                "id": "main",
+                "confidence": 0.95,
+                "roi": [[340, 10], [420, 10], [420, 120], [340, 120]],
+                "applies_to_lanes": [0],
+                "stop_line": {
+                    "points": [[100, 250], [300, 250]],
+                    "before_side": "negative",
+                    "margin_pixels": 3,
+                },
+            }
+        ],
+    }
+
+
+def polygon_signal_geometry(direction: list[int] | None = None) -> dict:
+    geometry = signal_geometry()
+    geometry.pop("boundaries")
+    lane = {
+        "index": 0,
+        "confidence": 0.93,
+        "polygon": [[100, 100], [300, 100], [300, 400], [100, 400]],
+    }
+    if direction is not None:
+        lane["direction"] = direction
+        lane["minimum_direction_alignment"] = 0.5
+    geometry["lanes"] = [lane]
+    return geometry
+
+
 class RoadOffensePipelineTest(unittest.TestCase):
     def test_scene_contains_calibrated_lane_and_crossing_evidence(self) -> None:
         geometry = {
@@ -179,6 +258,46 @@ class RoadOffensePipelineTest(unittest.TestCase):
     def test_low_confidence_crosswalk_is_unknown_not_an_accusation(self) -> None:
         scene = build_scene(crosswalk_tracking(), crosswalk_geometry(confidence=0.2))
         self.assertEqual(analyze_scene(scene, OffenseConfig())["event_count"], 0)
+
+    def test_stable_red_light_crossing_creates_candidate(self) -> None:
+        scene = build_scene(signal_tracking(), signal_geometry())
+        offenses = analyze_scene(scene, OffenseConfig())
+
+        self.assertEqual(offenses["event_counts"], {"red_light_running": 1})
+        self.assertEqual(offenses["events"][0]["track_id"], 5)
+        self.assertEqual(scene["frame_records"][0]["traffic_lights"][0]["state"], "red")
+        self.assertEqual(scene["frame_records"][0]["vehicles"][0]["signal_id"], "main")
+
+    def test_green_light_crossing_is_not_reported(self) -> None:
+        scene = build_scene(signal_tracking(state="green"), signal_geometry())
+        self.assertEqual(analyze_scene(scene, OffenseConfig())["event_count"], 0)
+
+    def test_low_confidence_red_light_is_not_reported(self) -> None:
+        scene = build_scene(
+            signal_tracking(confidence=0.4), signal_geometry()
+        )
+        self.assertEqual(analyze_scene(scene, OffenseConfig())["event_count"], 0)
+
+    def test_signal_can_use_explicit_lane_polygon_without_boundaries(self) -> None:
+        scene = build_scene(signal_tracking(), polygon_signal_geometry())
+        offenses = analyze_scene(scene, OffenseConfig())
+
+        self.assertEqual(offenses["event_counts"], {"red_light_running": 1})
+        self.assertEqual(scene["calibration"]["lane_indices"], [0])
+
+    def test_opposite_direction_vehicle_is_not_associated_with_signal(self) -> None:
+        scene = build_scene(signal_tracking(), polygon_signal_geometry([0, -1]))
+        offenses = analyze_scene(scene, OffenseConfig())
+
+        self.assertEqual(offenses["event_count"], 0)
+        moving = [
+            vehicle
+            for record in scene["frame_records"][1:]
+            for vehicle in record["vehicles"]
+            if vehicle["track_id"] == 5
+        ]
+        self.assertTrue(moving)
+        self.assertTrue(all(vehicle["signal_id"] is None for vehicle in moving))
 
 
 if __name__ == "__main__":

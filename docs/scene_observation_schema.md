@@ -83,6 +83,11 @@
 - `stop_line_position`：`before`、`after` 或 `unknown`。
 - `traffic_lights.state`：`red`、`yellow`、`green` 或 `unknown`。
 - `signal_id` 将车辆所在车道与对应信号灯关联；没有可靠关联时不要生成闯红灯事件。
+- 固定路口、横向道路或斜向道路应使用人工标定的车道多边形。每个车道可带图像坐标方向
+  `direction: [dx, dy]` 和 `minimum_direction_alignment`；不满足方向约束的车辆不得关联该车道
+  的信号灯。多边形重叠时车道必须记为未知，而不是任选一个。
+- 信号灯标定包含 `roi`、`applies_to_lanes` 和有方向的 `stop_line`。车辆底边中心只有从
+  `before_side` 穿到另一侧，且对应信号稳定为红灯时，才可生成待人工复核的候选事件。
 - `source_track_id` 表示抛出物轨迹已经由感知模块关联到车辆；仅检测到路面垃圾不够。
 - `camera_pose.mode` 为 `road_context` 或 `target_follow`。只有前者在云台稳定、完成标定且
   `road_transform_valid` 为真时，才允许车道、红灯、实线、逆行和斑马线规则产生事件。

@@ -202,8 +202,8 @@ PP-Vehicle 的压线、逆行和车道数据处理源码已带许可证保存在
 
 ### 当前可运行的道路几何离线验证
 
-`src/road_offense_pipeline.py` 可将车辆跟踪 JSON 与人工标定的道路边界组合，生成规则引擎
-所需的场景观测，并检测持续跨越已标注实线的候选事件。先用 `vehicle_tracker.py` 对视频
+`src/road_offense_pipeline.py` 可将车辆跟踪 JSON 与人工标定的道路几何组合，生成规则引擎
+所需的场景观测，并验证实线、斑马线和信号灯规则。先用 `vehicle_tracker.py` 对视频
 生成跟踪 JSON，再复制 `config/road_geometry.example.json`，按该视频画面修改标定文件：
 
     python src/vehicle_tracker.py --video recordings/test_inputs/input.mp4 \
@@ -211,10 +211,15 @@ PP-Vehicle 的压线、逆行和车道数据处理源码已带许可证保存在
     python src/road_offense_pipeline.py recordings/input_tracked.json \
         --geometry config/road_geometry.json
 
-实际跟踪 JSON 文件名以程序输出为准。边界点按画面从左到右排列；`normalized: true` 时坐标
-使用 0 到 1 的画面比例。至少标出道路左右边界和需要判断的车道线，点要沿着可见线段由下往上
-选取。输出的 `*_scene_observations.json` 和 `*_offenses.json` 默认写在跟踪 JSON 所在目录；
+实际跟踪 JSON 文件名以程序输出为准。`normalized: true` 时坐标使用 0 到 1 的画面比例。
+前视道路可按画面从左到右标定 `boundaries`；固定路口或斜向道路应使用 `lanes` 多边形。
+车道可配置图像坐标中的允许行驶方向 `direction: [dx, dy]`，反向或横向轨迹不会绑定该车道的
+信号灯。多边形重叠处会返回未知车道，避免歧义区域产生结论。`traffic_signals` 还需标定灯框
+ROI、适用车道及有方向的停止线。输出的 `*_scene_observations.json` 和 `*_offenses.json` 默认写在跟踪 JSON 所在目录；
 后者包含 `selected_offender`，无满足条件的规则事件时状态为 `NO_CONFIDENT_OFFENDER`。
+
+上海路口负样本标定位于 `config/validation/chinese_signal_cc0_geometry.json`：画面中的绿灯通行车辆
+能够关联信号灯，横向车流不关联，运行结果应为零个闯红灯事件。该文件仅适用于对应素材和画面裁剪。
 
 此验证器不自动检测车道线，也不适用于摄像头平移、俯仰或云台跟随期间直接套用固定画面标定。
 车道线被遮挡、透视变化明显或边界标错时，不应采信候选结果。转向灯、红绿灯、停止线、行人

@@ -24,6 +24,15 @@ class Boundary:
 
 
 @dataclass(frozen=True)
+class Lane:
+    lane_index: int
+    polygon: tuple[Point, ...]
+    confidence: float
+    direction: Point | None
+    minimum_direction_alignment: float
+
+
+@dataclass(frozen=True)
 class Crosswalk:
     crosswalk_id: str
     pedestrian_zone: tuple[Point, ...]
@@ -37,6 +46,17 @@ class Crosswalk:
     stopped_motion_per_second: float
     stop_hold_seconds: float
     stop_lookback_seconds: float
+
+
+@dataclass(frozen=True)
+class TrafficSignal:
+    signal_id: str
+    roi: tuple[Point, ...]
+    applies_to_lanes: tuple[int, ...]
+    stop_line: tuple[Point, Point]
+    before_side: int
+    stop_line_margin_pixels: float
+    confidence: float
 
 
 def _point(value: Sequence[float], *, normalized: bool, width: float, height: float) -> Point:
@@ -70,6 +90,54 @@ def parse_boundaries(
                 boundary_id=str(item["id"]),
                 boundary_type=str(item.get("type", "unknown")),
                 points=points,
+            )
+        )
+    return result
+
+
+def parse_lanes(
+    values: Iterable[dict], *, width: int, height: int, normalized: bool = False
+) -> list[Lane]:
+    """Validate explicit lane polygons for arbitrary camera viewpoints."""
+    if width <= 0 or height <= 0:
+        raise ValueError("image dimensions must be positive")
+    result: list[Lane] = []
+    lane_indices: set[int] = set()
+    for item in values:
+        lane_index = int(item["index"])
+        if lane_index < 0:
+            raise ValueError("lane index must be non-negative")
+        if lane_index in lane_indices:
+            raise ValueError(f"duplicate lane index: {lane_index}")
+        lane_indices.add(lane_index)
+        confidence = float(item.get("confidence", 0.9))
+        if not 0 <= confidence <= 1:
+            raise ValueError("lane confidence must be in the range [0, 1]")
+        direction_value = item.get("direction")
+        direction = None
+        if direction_value is not None:
+            if len(direction_value) != 2:
+                raise ValueError("lane direction must contain [dx, dy]")
+            direction = (float(direction_value[0]), float(direction_value[1]))
+            if not all(isfinite(value) for value in direction) or direction == (0.0, 0.0):
+                raise ValueError("lane direction must be a finite non-zero vector")
+        minimum_alignment = float(item.get("minimum_direction_alignment", 0.2))
+        if not -1 <= minimum_alignment <= 1:
+            raise ValueError(
+                "lane minimum_direction_alignment must be in the range [-1, 1]"
+            )
+        result.append(
+            Lane(
+                lane_index=lane_index,
+                polygon=_polygon(
+                    item.get("polygon", []),
+                    normalized=normalized,
+                    width=width,
+                    height=height,
+                ),
+                confidence=confidence,
+                direction=direction,
+                minimum_direction_alignment=minimum_alignment,
             )
         )
     return result
@@ -172,6 +240,59 @@ def parse_crosswalks(
     return result
 
 
+def parse_traffic_signals(
+    values: Iterable[dict], *, width: int, height: int, normalized: bool = False
+) -> list[TrafficSignal]:
+    """Validate signal ROIs, lane associations and oriented stop lines."""
+    if width <= 0 or height <= 0:
+        raise ValueError("image dimensions must be positive")
+    result: list[TrafficSignal] = []
+    signal_ids: set[str] = set()
+    for item in values:
+        signal_id = str(item["id"])
+        if signal_id in signal_ids:
+            raise ValueError(f"duplicate traffic signal id: {signal_id}")
+        signal_ids.add(signal_id)
+        lanes = tuple(int(value) for value in item.get("applies_to_lanes", []))
+        if not lanes or any(value < 0 for value in lanes) or len(set(lanes)) != len(lanes):
+            raise ValueError(
+                "traffic signal applies_to_lanes must contain unique non-negative lanes"
+            )
+        line_values = item.get("stop_line", {}).get("points", [])
+        line = tuple(
+            _point(point, normalized=normalized, width=width, height=height)
+            for point in line_values
+        )
+        if len(line) != 2 or line[0] == line[1]:
+            raise ValueError("traffic signal stop_line needs two distinct points")
+        before_name = str(item.get("stop_line", {}).get("before_side", "negative"))
+        if before_name not in {"negative", "positive"}:
+            raise ValueError("stop_line before_side must be negative or positive")
+        margin = float(item.get("stop_line", {}).get("margin_pixels", 3.0))
+        confidence = float(item.get("confidence", 0.9))
+        if margin < 0:
+            raise ValueError("stop_line margin_pixels must not be negative")
+        if not 0 <= confidence <= 1:
+            raise ValueError("traffic signal confidence must be in the range [0, 1]")
+        result.append(
+            TrafficSignal(
+                signal_id=signal_id,
+                roi=_polygon(
+                    item.get("roi", []),
+                    normalized=normalized,
+                    width=width,
+                    height=height,
+                ),
+                applies_to_lanes=lanes,
+                stop_line=(line[0], line[1]),
+                before_side=-1 if before_name == "negative" else 1,
+                stop_line_margin_pixels=margin,
+                confidence=confidence,
+            )
+        )
+    return result
+
+
 def point_in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
     """Return true when a point lies inside or on the edge of a polygon."""
     if len(polygon) < 3:
@@ -194,6 +315,24 @@ def point_in_polygon(point: Point, polygon: Sequence[Point]) -> bool:
     return inside
 
 
+def signed_distance_to_line(point: Point, line: Sequence[Point]) -> float:
+    """Return oriented perpendicular distance from a two-point line."""
+    if len(line) != 2 or line[0] == line[1]:
+        raise ValueError("line needs two distinct points")
+    (x1, y1), (x2, y2) = line
+    return ((x2 - x1) * (point[1] - y1) - (y2 - y1) * (point[0] - x1)) / hypot(
+        x2 - x1, y2 - y1
+    )
+
+
+def stop_line_position(point: Point, signal: TrafficSignal) -> str:
+    distance = signed_distance_to_line(point, signal.stop_line)
+    if abs(distance) <= signal.stop_line_margin_pixels:
+        return "unknown"
+    side = 1 if distance > 0 else -1
+    return "before" if side == signal.before_side else "after"
+
+
 def x_at_y(points: Sequence[Point], y: float) -> float | None:
     """Interpolate the x coordinate where a polyline meets a horizontal row."""
     candidates: list[float] = []
@@ -212,13 +351,26 @@ def x_at_y(points: Sequence[Point], y: float) -> float | None:
 
 
 def lane_at_point(
-    point: Point, boundaries: Sequence[Boundary], *, minimum_margin: float = 2.0
+    point: Point,
+    boundaries: Sequence[Boundary],
+    *,
+    lanes: Sequence[Lane] = (),
+    minimum_margin: float = 2.0,
 ) -> tuple[int | None, float]:
-    """Return the interval index and confidence for a bottom-center point.
+    """Return the calibrated lane and confidence for a bottom-center point.
 
-    Boundaries must be ordered from image-left to image-right.  The outermost
-    boundaries are required; points outside them are intentionally unknown.
+    Explicit polygons support arbitrary road directions and take precedence.
+    A point covered by multiple polygons is intentionally unknown.  Without
+    polygons, boundaries must be ordered image-left to image-right and the
+    outermost boundaries are required.
     """
+    containing_lanes = [lane for lane in lanes if point_in_polygon(point, lane.polygon)]
+    if len(containing_lanes) == 1:
+        lane = containing_lanes[0]
+        return lane.lane_index, round(lane.confidence, 3)
+    if len(containing_lanes) > 1:
+        return None, 0.0
+
     x, y = point
     crossings = [
         (boundary, x_at_y(boundary.points, y))

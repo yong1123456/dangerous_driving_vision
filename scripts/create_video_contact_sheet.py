@@ -12,6 +12,18 @@ import cv2
 import numpy as np
 
 
+def read_near_frame(
+    capture: cv2.VideoCapture, frame_index: int, *, maximum_backtrack: int = 12
+) -> tuple[int, np.ndarray]:
+    """Read a requested frame, tolerating inaccurate container frame counts."""
+    for candidate in range(frame_index, max(-1, frame_index - maximum_backtrack - 1), -1):
+        capture.set(cv2.CAP_PROP_POS_FRAMES, candidate)
+        ok, frame = capture.read()
+        if ok and frame is not None:
+            return candidate, frame
+    raise RuntimeError(f"Unable to read frame {frame_index + 1}")
+
+
 def parse_crop(value: str | None) -> tuple[int, int, int, int] | None:
     if value is None:
         return None
@@ -61,16 +73,13 @@ def create_contact_sheet(
     tiles: list[np.ndarray] = []
     try:
         for frame_index in frame_indices:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
-            ok, frame = capture.read()
-            if not ok:
-                raise RuntimeError(f"Unable to read frame {frame_index + 1}")
+            actual_index, frame = read_near_frame(capture, int(frame_index))
             frame = frame[
                 crop_y : crop_y + crop_height,
                 crop_x : crop_x + crop_width,
             ]
             tile = cv2.resize(frame, (tile_width, tile_height))
-            label = f"frame {frame_index + 1} / {frame_index / fps:.2f}s"
+            label = f"frame {actual_index + 1} / {actual_index / fps:.2f}s"
             cv2.rectangle(tile, (0, 0), (tile_width, 36), (0, 0, 0), -1)
             cv2.putText(
                 tile,

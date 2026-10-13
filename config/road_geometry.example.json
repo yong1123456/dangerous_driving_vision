@@ -18,5 +18,34 @@
     {"id": "road_left", "type": "dashed", "points": [[0.10, 1.0], [0.42, 0.40]]},
     {"id": "center_solid", "type": "double_solid", "points": [[0.50, 1.0], [0.50, 0.40]]},
     {"id": "road_right", "type": "dashed", "points": [[0.90, 1.0], [0.58, 0.40]]}
+  ],
+  "lanes": [
+    {
+      "index": 0,
+      "confidence": 0.9,
+      "direction": [0.0, -1.0],
+      "minimum_direction_alignment": 0.2,
+      "polygon": [[0.10, 1.0], [0.50, 1.0], [0.50, 0.40], [0.42, 0.40]]
+    },
+    {
+      "index": 1,
+      "confidence": 0.9,
+      "direction": [0.0, -1.0],
+      "minimum_direction_alignment": 0.2,
+      "polygon": [[0.50, 1.0], [0.90, 1.0], [0.58, 0.40], [0.50, 0.40]]
+    }
+  ],
+  "traffic_signals": [
+    {
+      "id": "main_signal",
+      "confidence": 0.95,
+      "roi": [[0.44, 0.05], [0.56, 0.05], [0.56, 0.25], [0.44, 0.25]],
+      "applies_to_lanes": [0, 1],
+      "stop_line": {
+        "points": [[0.10, 0.72], [0.90, 0.72]],
+        "before_side": "negative",
+        "margin_pixels": 4.0
+      }
+    }
   ]
 }

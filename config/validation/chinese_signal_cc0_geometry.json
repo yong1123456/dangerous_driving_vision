@@ -1,0 +1,49 @@
+{
+  "image_width": 1280,
+  "image_height": 720,
+  "normalized": true,
+  "validation_only": true,
+  "notes": "Manual calibration for the fixed Shanghai intersection clip. Lane 0 only covers the movement controlled by main_signal; horizontal cross traffic is intentionally excluded. Recalibrate for any other camera, crop, or PTZ pose.",
+  "camera_pose": {
+    "mode": "road_context",
+    "pan_degrees": 0.0,
+    "tilt_degrees": 0.0,
+    "pan_rate_deg_s": 0.0,
+    "tilt_rate_deg_s": 0.0,
+    "calibrated": true,
+    "road_transform_valid": true,
+    "confidence": 0.9
+  },
+  "lanes": [
+    {
+      "index": 0,
+      "confidence": 0.9,
+      "direction": [0.0, -1.0],
+      "minimum_direction_alignment": 0.2,
+      "polygon": [
+        [0.27, 1.0],
+        [0.59, 1.0],
+        [0.57, 0.91],
+        [0.38, 0.91]
+      ]
+    }
+  ],
+  "traffic_signals": [
+    {
+      "id": "main_signal",
+      "confidence": 0.9,
+      "roi": [
+        [0.65, 0.43],
+        [0.74, 0.43],
+        [0.74, 0.61],
+        [0.65, 0.61]
+      ],
+      "applies_to_lanes": [0],
+      "stop_line": {
+        "points": [[0.27, 0.965], [0.59, 0.965]],
+        "before_side": "positive",
+        "margin_pixels": 3.0
+      }
+    }
+  ]
+}

@@ -26,13 +26,25 @@ from road_geometry import (
     lane_at_point,
     parse_boundaries,
     parse_crosswalks,
+    parse_lanes,
+    parse_traffic_signals,
     point_in_polygon,
+    stop_line_position,
 )
 
 
 VEHICLE_LABELS = {"vehicle", "car", "motorcycle", "bus", "truck"}
 PERSON_LABELS = {"person", "pedestrian"}
 TrackSample = tuple[int, float, Point, float]
+
+
+def _box_center(box: list[float] | tuple[float, ...]) -> Point:
+    if len(box) != 4:
+        raise ValueError("boxes must contain [x1, y1, x2, y2]")
+    x1, y1, x2, y2 = (float(value) for value in box)
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("boxes must have positive area")
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -117,6 +129,51 @@ def _motion_speed(
         return None
     return hypot(current[2][0] - previous[2][0], current[2][1] - previous[2][1]) / (
         diagonal * elapsed
+    )
+
+
+def _trajectory_directions(
+    trajectories: dict[int, list[TrackSample]],
+    *,
+    window_seconds: float,
+    diagonal: float,
+    minimum_motion: float,
+) -> dict[tuple[int, int], tuple[Point | None, float]]:
+    """Return recent image-space motion vectors and their confidence."""
+    if window_seconds <= 0 or minimum_motion <= 0:
+        raise ValueError("direction window and minimum motion must be positive")
+    output: dict[tuple[int, int], tuple[Point | None, float]] = {}
+    for track_id, trajectory in trajectories.items():
+        for index, current in enumerate(trajectory):
+            earliest = index
+            while (
+                earliest > 0
+                and current[1] - trajectory[earliest - 1][1] <= window_seconds
+            ):
+                earliest -= 1
+            if earliest == index:
+                output[(track_id, current[0])] = (None, 0.0)
+                continue
+            previous = trajectory[earliest]
+            motion = (current[2][0] - previous[2][0], current[2][1] - previous[2][1])
+            distance = hypot(*motion)
+            confidence = min(1.0, distance / (diagonal * minimum_motion))
+            output[(track_id, current[0])] = (
+                motion if confidence > 0 else None,
+                round(confidence, 5),
+            )
+    return output
+
+
+def _direction_alignment(motion: Point | None, expected: Point | None) -> float | None:
+    if motion is None or expected is None:
+        return None
+    motion_length = hypot(*motion)
+    expected_length = hypot(*expected)
+    if motion_length == 0 or expected_length == 0:
+        return None
+    return (motion[0] * expected[0] + motion[1] * expected[1]) / (
+        motion_length * expected_length
     )
 
 
@@ -223,13 +280,28 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
     boundaries = parse_boundaries(
         geometry.get("boundaries", []), width=width, height=height, normalized=normalized
     )
+    lanes = parse_lanes(
+        geometry.get("lanes", []), width=width, height=height, normalized=normalized
+    )
     crosswalks = parse_crosswalks(
         geometry.get("crosswalks", []), width=width, height=height, normalized=normalized
     )
+    traffic_signals = parse_traffic_signals(
+        geometry.get("traffic_signals", []),
+        width=width,
+        height=height,
+        normalized=normalized,
+    )
     if boundaries and len(boundaries) < 2:
         raise ValueError("road geometry needs at least two ordered boundaries")
-    if not boundaries and not crosswalks:
-        raise ValueError("road geometry needs boundaries or a crosswalk calibration")
+    if traffic_signals and len(boundaries) < 2 and not lanes:
+        raise ValueError(
+            "traffic signal calibration needs lane polygons or ordered boundaries"
+        )
+    if not boundaries and not lanes and not crosswalks and not traffic_signals:
+        raise ValueError(
+            "road geometry needs boundaries, lanes, a crosswalk, or traffic signals"
+        )
     records = tracking.get("frame_records")
     if not isinstance(records, list) or not records:
         raise ValueError("tracking JSON must contain frame_records")
@@ -275,7 +347,19 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
         width,
         height,
     )
+    diagonal = hypot(width, height)
+    trajectory_directions = _trajectory_directions(
+        vehicle_trajectories,
+        window_seconds=float(geometry.get("direction_window_seconds", 0.5)),
+        diagonal=diagonal,
+        minimum_motion=float(geometry.get("minimum_direction_motion", 0.002)),
+    )
     pose = _pose(geometry)
+    lanes_by_index = {lane.lane_index: lane for lane in lanes}
+    signals_by_lane: dict[int, list[Any]] = defaultdict(list)
+    for signal in traffic_signals:
+        for lane_index in signal.applies_to_lanes:
+            signals_by_lane[lane_index].append(signal)
     scene_records: list[dict[str, Any]] = []
     for record in records:
         frame = int(record["frame"])
@@ -288,12 +372,33 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
             try:
                 box = item["box"]
                 point = bottom_center(box)
-                lane_index, lane_confidence = lane_at_point(point, boundaries)
+                lane_index, lane_confidence = lane_at_point(
+                    point, boundaries, lanes=lanes
+                )
             except (KeyError, TypeError, ValueError):
                 continue
             track_id = int(item.get("track_id", -1))
             if track_id < 0:
                 continue
+            lane = lanes_by_index.get(lane_index)
+            motion, direction_confidence = trajectory_directions.get(
+                (track_id, frame), (None, 0.0)
+            )
+            direction_alignment = _direction_alignment(
+                motion, lane.direction if lane is not None else None
+            )
+            lane_signals = signals_by_lane.get(lane_index, [])
+            signal = lane_signals[0] if len(lane_signals) == 1 else None
+            if (
+                signal is not None
+                and lane is not None
+                and lane.direction is not None
+                and (
+                    direction_alignment is None
+                    or direction_alignment < lane.minimum_direction_alignment
+                )
+            ):
+                signal = None
             vehicles.append(
                 {
                     "track_id": track_id,
@@ -302,11 +407,61 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
                     "lane_confidence": lane_confidence,
                     "turn_signal": "unknown",
                     "turn_signal_confidence": 0.0,
-                    "stop_line_position": "unknown",
-                    "signal_id": None,
-                    "direction_alignment": None,
-                    "direction_confidence": 0.0,
+                    "stop_line_position": (
+                        stop_line_position(point, signal)
+                        if signal is not None
+                        else "unknown"
+                    ),
+                    "signal_id": signal.signal_id if signal is not None else None,
+                    "direction_alignment": (
+                        round(direction_alignment, 5)
+                        if direction_alignment is not None
+                        else None
+                    ),
+                    "direction_confidence": direction_confidence,
                     "bottom_center": list(point),
+                }
+            )
+        traffic_lights: list[dict[str, Any]] = []
+        for signal in traffic_signals:
+            candidates: list[dict[str, Any]] = []
+            for item in record.get("tracks", []):
+                if str(item.get("label", "")).lower() != "traffic_light":
+                    continue
+                try:
+                    if point_in_polygon(_box_center(item["box"]), signal.roi):
+                        candidates.append(item)
+                except (KeyError, TypeError, ValueError):
+                    continue
+            best = max(
+                candidates,
+                key=lambda item: float(
+                    item.get("traffic_light_state_confidence", 0.0)
+                ),
+                default=None,
+            )
+            state = str(best.get("traffic_light_state", "unknown")) if best else "unknown"
+            if state not in {"red", "yellow", "green"}:
+                state = "unknown"
+            confidence = (
+                min(
+                    signal.confidence,
+                    float(best.get("traffic_light_state_confidence", 0.0)),
+                )
+                if best is not None and state != "unknown"
+                else 0.0
+            )
+            traffic_lights.append(
+                {
+                    "signal_id": signal.signal_id,
+                    "state": state,
+                    "confidence": round(confidence, 5),
+                    "applies_to_lanes": list(signal.applies_to_lanes),
+                    "source_track_id": (
+                        int(best["track_id"])
+                        if best is not None and best.get("track_id") is not None
+                        else None
+                    ),
                 }
             )
         scene_records.append(
@@ -315,6 +470,7 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
                 "timestamp_seconds": timestamp,
                 "camera_pose": pose,
                 "vehicles": vehicles,
+                "traffic_lights": traffic_lights,
                 "lane_boundary_crossings": boundary_events.get(frame, []),
                 "crosswalk_interactions": crosswalk_events.get(frame, []),
             }
@@ -328,8 +484,12 @@ def build_scene(tracking: dict[str, Any], geometry: dict[str, Any]) -> dict[str,
         "calibration": {
             "boundary_count": len(boundaries),
             "boundary_ids": [boundary.boundary_id for boundary in boundaries],
+            "lane_count": len(lanes),
+            "lane_indices": [lane.lane_index for lane in lanes],
             "crosswalk_count": len(crosswalks),
             "crosswalk_ids": [crosswalk.crosswalk_id for crosswalk in crosswalks],
+            "traffic_signal_count": len(traffic_signals),
+            "traffic_signal_ids": [signal.signal_id for signal in traffic_signals],
             "normalized": normalized,
         },
         "frame_records": scene_records,
